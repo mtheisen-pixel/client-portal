@@ -1,0 +1,62 @@
+const ENDPOINT = '/.netlify/functions/admin'
+
+async function call<T>(password: string, action: string, payload: Record<string, unknown> = {}) {
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password, action, ...payload }),
+  })
+
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`)
+  return data as T
+}
+
+export interface AdminClient {
+  id: string
+  company_name: string
+  created_at: string
+}
+
+export interface AdminDocument {
+  id: string
+  client_id: string
+  title: string
+  description: string | null
+  category: string | null
+  file_path: string
+  sort_order: number
+  created_at: string
+}
+
+export const adminApi = {
+  listClients: (password: string) => call<{ clients: AdminClient[] }>(password, 'list_clients'),
+
+  createClient: (password: string, email: string, clientPassword: string, companyName: string) =>
+    call<{ client: AdminClient }>(password, 'create_client', {
+      email,
+      password: clientPassword,
+      companyName,
+    }),
+
+  listDocuments: (password: string, clientId: string) =>
+    call<{ documents: AdminDocument[] }>(password, 'list_documents', { clientId }),
+
+  createUploadUrl: (password: string, clientId: string, filename: string) =>
+    call<{ path: string; token: string }>(password, 'create_upload_url', { clientId, filename }),
+
+  createDocument: (
+    password: string,
+    args: {
+      clientId: string
+      title: string
+      description?: string
+      category?: string
+      filePath: string
+      sortOrder?: number
+    },
+  ) => call<{ document: AdminDocument }>(password, 'create_document', args),
+
+  deleteDocument: (password: string, documentId: string, filePath: string) =>
+    call<{ ok: true }>(password, 'delete_document', { documentId, filePath }),
+}
