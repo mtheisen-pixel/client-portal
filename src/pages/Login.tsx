@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { Navigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
+import { Logo } from '../components/Logo'
 
 export function Login() {
   const { session, loading } = useAuth()
@@ -26,9 +27,11 @@ export function Login() {
 
   return (
     <div className="page-center">
+      <Logo />
       <form className="card" onSubmit={handleSubmit}>
-        <h1>Client Portal</h1>
-        <p className="muted">Sign in to view your documents.</p>
+        <span className="eyebrow">Client Portal</span>
+        <h1>Sign in</h1>
+        <p className="muted">Enter your details to view your documents.</p>
 
         <label htmlFor="email">Email</label>
         <input

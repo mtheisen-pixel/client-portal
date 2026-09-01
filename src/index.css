@@ -1,14 +1,18 @@
 :root {
   color-scheme: light;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --bg: #f6f7f9;
-  --card: #ffffff;
-  --border: #e2e5ea;
-  --text: #1a1d23;
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  --teal: #00b894;
+  --teal-dark: #009377;
+  --teal-tint: #e6f7f3;
+  --navy: #0d1b2a;
+  --body: #515c68;
   --muted: #6b7280;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --danger: #b91c1c;
+  --faint: #8fa0b0;
+  --line: #e4e8e7;
+  --tint: #fafbfc;
+  --card: #ffffff;
+  --danger: #c0392b;
 }
 
 * {
@@ -17,35 +21,108 @@
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--tint);
+  color: var(--body);
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--navy);
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+h1 {
+  font-size: 1.6rem;
+  font-weight: 800;
+}
+
+h2 {
+  font-size: 1.15rem;
+}
+
+h3 {
+  font-size: 1rem;
+  margin-top: 20px;
+}
+
+a {
+  color: var(--teal);
+}
+
+/* Section eyebrow labels, e.g. "CLIENT PORTAL" above a heading */
+.eyebrow {
+  display: block;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--teal);
+  margin-bottom: 10px;
+}
+
+/* Wordmark: navy "brand"/"fy", teal "ai" */
+.logo-wordmark {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.01em;
+}
+
+.logo-wordmark .logo-ai {
+  color: var(--teal);
+}
+
+.site-header {
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+
+.site-header-inner {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 18px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.site-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .page-center {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 24px;
+  gap: 32px;
 }
 
 .page {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
-  padding: 32px 24px 64px;
+  padding: 40px 24px 64px;
 }
 
 .card {
   background: var(--card);
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 24px;
+  padding: 28px;
   margin-bottom: 24px;
 }
 
 form.card {
   width: 100%;
-  max-width: 360px;
+  max-width: 380px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -57,53 +134,64 @@ form.card {
   gap: 6px;
 }
 
-h1 {
-  margin: 0 0 4px;
-  font-size: 1.4rem;
-}
-
-h2 {
-  margin-top: 0;
-  font-size: 1.1rem;
-}
-
 label {
   font-size: 0.85rem;
   font-weight: 600;
-  margin-top: 10px;
+  color: var(--navy);
+  margin-top: 14px;
 }
 
 input,
 select {
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: inherit;
   font-size: 0.95rem;
+  color: var(--navy);
+  background: var(--card);
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px var(--teal-tint);
 }
 
 button {
-  margin-top: 16px;
-  padding: 9px 16px;
-  border: none;
-  border-radius: 8px;
-  background: var(--accent);
+  margin-top: 18px;
+  padding: 10px 20px;
+  border: 1px solid var(--teal);
+  border-radius: 6px;
+  background: var(--teal);
   color: white;
+  font-family: inherit;
   font-weight: 600;
+  font-size: 0.95rem;
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 button:hover {
-  background: var(--accent-hover);
+  background: var(--teal-dark);
+  border-color: var(--teal-dark);
 }
 
 button.secondary {
   background: transparent;
-  color: var(--text);
-  border: 1px solid var(--border);
+  color: var(--teal);
+  border: 1px solid var(--teal);
+}
+
+button.secondary:hover {
+  background: var(--teal-tint);
+  color: var(--teal-dark);
+  border-color: var(--teal-dark);
 }
 
 button:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
@@ -121,7 +209,7 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 24px;
+  margin-bottom: 28px;
 }
 
 .doc-list {
@@ -137,22 +225,26 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 12px 16px;
+  padding: 14px 18px;
   background: var(--card);
 }
 
 .doc-title {
   font-weight: 600;
+  color: var(--navy);
 }
 
 .badge {
   display: inline-block;
   margin-top: 4px;
-  font-size: 0.75rem;
-  color: var(--accent);
-  background: #eff4ff;
-  border-radius: 6px;
-  padding: 2px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--teal-dark);
+  background: var(--teal-tint);
+  border-radius: 4px;
+  padding: 3px 8px;
 }

@@ -3,6 +3,8 @@ import type { FormEvent } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { adminApi } from '../lib/adminApi'
 import type { AdminClient, AdminDocument } from '../lib/adminApi'
+import { Logo } from '../components/Logo'
+import { SiteHeader } from '../components/SiteHeader'
 
 export function Admin() {
   const [password, setPassword] = useState('')
@@ -132,8 +134,10 @@ export function Admin() {
   if (!unlocked) {
     return (
       <div className="page-center">
+        <Logo />
         <form className="card" onSubmit={handlePasswordSubmit}>
-          <h1>Admin</h1>
+          <span className="eyebrow">Admin</span>
+          <h1>Enter password</h1>
           <label htmlFor="admin-password">Admin password</label>
           <input
             id="admin-password"
@@ -153,88 +157,97 @@ export function Admin() {
   }
 
   return (
-    <div className="page">
-      <header className="topbar">
-        <h1>Admin</h1>
-      </header>
+    <>
+      <SiteHeader>
+        <span className="eyebrow" style={{ margin: 0 }}>
+          Admin
+        </span>
+      </SiteHeader>
 
-      {error && <p className="error">{error}</p>}
+      <div className="page">
+        {error && <p className="error">{error}</p>}
 
-      <section className="card">
-        <h2>Add a client</h2>
-        <form onSubmit={handleCreateClient} className="stacked-form">
-          <label htmlFor="companyName">Company name</label>
-          <input id="companyName" name="companyName" required />
+        <section className="card">
+          <h2>Add a client</h2>
+          <form onSubmit={handleCreateClient} className="stacked-form">
+            <label htmlFor="companyName">Company name</label>
+            <input id="companyName" name="companyName" required />
 
-          <label htmlFor="email">Login email</label>
-          <input id="email" name="email" type="email" required />
+            <label htmlFor="email">Login email</label>
+            <input id="email" name="email" type="email" required />
 
-          <label htmlFor="clientPassword">Temporary password</label>
-          <input id="clientPassword" name="clientPassword" type="text" required minLength={8} />
+            <label htmlFor="clientPassword">Temporary password</label>
+            <input id="clientPassword" name="clientPassword" type="text" required minLength={8} />
 
-          <button type="submit" disabled={busy}>
-            Create client
-          </button>
-        </form>
-      </section>
+            <button type="submit" disabled={busy}>
+              Create client
+            </button>
+          </form>
+        </section>
 
-      <section className="card">
-        <h2>Documents</h2>
-        <label htmlFor="clientSelect">Client</label>
-        <select
-          id="clientSelect"
-          value={selectedClientId}
-          onChange={(e) => setSelectedClientId(e.target.value)}
-        >
-          <option value="">Select a client…</option>
-          {clients.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.company_name}
-            </option>
-          ))}
-        </select>
+        <section className="card">
+          <h2>Documents</h2>
+          <label htmlFor="clientSelect">Client</label>
+          <select
+            id="clientSelect"
+            value={selectedClientId}
+            onChange={(e) => setSelectedClientId(e.target.value)}
+          >
+            <option value="">Select a client…</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.company_name}
+              </option>
+            ))}
+          </select>
 
-        {selectedClientId && (
-          <>
-            <ul className="doc-list">
-              {docs.map((doc) => (
-                <li key={doc.id} className="doc-row">
-                  <div>
-                    <div className="doc-title">{doc.title}</div>
-                    {doc.category && <span className="badge">{doc.category}</span>}
-                  </div>
-                  <button type="button" className="secondary" onClick={() => handleDelete(doc)} disabled={busy}>
-                    Delete
-                  </button>
-                </li>
-              ))}
-              {docs.length === 0 && <p className="muted">No documents yet.</p>}
-            </ul>
+          {selectedClientId && (
+            <>
+              <ul className="doc-list">
+                {docs.map((doc) => (
+                  <li key={doc.id} className="doc-row">
+                    <div>
+                      <div className="doc-title">{doc.title}</div>
+                      {doc.category && <span className="badge">{doc.category}</span>}
+                    </div>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => handleDelete(doc)}
+                      disabled={busy}
+                    >
+                      Delete
+                    </button>
+                  </li>
+                ))}
+                {docs.length === 0 && <p className="muted">No documents yet.</p>}
+              </ul>
 
-            <h3>Upload a document</h3>
-            <form onSubmit={handleUpload} className="stacked-form">
-              <label htmlFor="title">Title</label>
-              <input id="title" name="title" required />
+              <h3>Upload a document</h3>
+              <form onSubmit={handleUpload} className="stacked-form">
+                <label htmlFor="title">Title</label>
+                <input id="title" name="title" required />
 
-              <label htmlFor="description">Description</label>
-              <input id="description" name="description" />
+                <label htmlFor="description">Description</label>
+                <input id="description" name="description" />
 
-              <label htmlFor="category">Category</label>
-              <input id="category" name="category" placeholder="e.g. Brand Guide" />
+                <label htmlFor="category">Category</label>
+                <input id="category" name="category" placeholder="e.g. Brand Guide" />
 
-              <label htmlFor="sortOrder">Sort order</label>
-              <input id="sortOrder" name="sortOrder" type="number" defaultValue={0} />
+                <label htmlFor="sortOrder">Sort order</label>
+                <input id="sortOrder" name="sortOrder" type="number" defaultValue={0} />
 
-              <label htmlFor="file">File</label>
-              <input id="file" name="file" type="file" required />
+                <label htmlFor="file">File</label>
+                <input id="file" name="file" type="file" required />
 
-              <button type="submit" disabled={busy}>
-                {busy ? 'Uploading…' : 'Upload'}
-              </button>
-            </form>
-          </>
-        )}
-      </section>
-    </div>
+                <button type="submit" disabled={busy}>
+                  {busy ? 'Uploading…' : 'Upload'}
+                </button>
+              </form>
+            </>
+          )}
+        </section>
+      </div>
+    </>
   )
 }

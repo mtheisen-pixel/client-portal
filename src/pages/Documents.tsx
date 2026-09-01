@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
+import { SiteHeader } from '../components/SiteHeader'
 
 interface DocumentRow {
   id: string
@@ -77,43 +78,49 @@ export function Documents() {
   }
 
   return (
-    <div className="page">
-      <header className="topbar">
-        <div>
-          <h1>{companyName ?? 'Your Documents'}</h1>
-          <p className="muted">{session?.user.email}</p>
-        </div>
+    <>
+      <SiteHeader>
         <button type="button" className="secondary" onClick={handleSignOut}>
           Sign out
         </button>
-      </header>
+      </SiteHeader>
 
-      {error && <p className="error">{error}</p>}
+      <div className="page">
+        <header className="topbar">
+          <div>
+            <span className="eyebrow">Client Portal</span>
+            <h1>{companyName ?? 'Your Documents'}</h1>
+            <p className="muted">{session?.user.email}</p>
+          </div>
+        </header>
 
-      {loading ? (
-        <p className="muted">Loading documents…</p>
-      ) : docs.length === 0 ? (
-        <p className="muted">No documents have been shared with you yet.</p>
-      ) : (
-        <ul className="doc-list">
-          {docs.map((doc) => (
-            <li key={doc.id} className="doc-row">
-              <div>
-                <div className="doc-title">{doc.title}</div>
-                {doc.category && <span className="badge">{doc.category}</span>}
-                {doc.description && <p className="muted">{doc.description}</p>}
-              </div>
-              <button
-                type="button"
-                onClick={() => handleDownload(doc)}
-                disabled={downloadingId === doc.id}
-              >
-                {downloadingId === doc.id ? 'Downloading…' : 'Download'}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+        {error && <p className="error">{error}</p>}
+
+        {loading ? (
+          <p className="muted">Loading documents…</p>
+        ) : docs.length === 0 ? (
+          <p className="muted">No documents have been shared with you yet.</p>
+        ) : (
+          <ul className="doc-list">
+            {docs.map((doc) => (
+              <li key={doc.id} className="doc-row">
+                <div>
+                  <div className="doc-title">{doc.title}</div>
+                  {doc.category && <span className="badge">{doc.category}</span>}
+                  {doc.description && <p className="muted">{doc.description}</p>}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleDownload(doc)}
+                  disabled={downloadingId === doc.id}
+                >
+                  {downloadingId === doc.id ? 'Downloading…' : 'Download'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </>
   )
 }
