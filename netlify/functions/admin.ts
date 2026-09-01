@@ -14,7 +14,10 @@ const supabaseAdmin = createClient(
 const BUCKET = 'client-documents'
 
 function checkPassword(candidate: unknown): candidate is string {
-  const expected = process.env.ADMIN_PASSWORD ?? ''
+  // .trim() guards against a trailing newline/space in the env var value,
+  // a common artifact of pasting into Netlify's env var UI, which would
+  // otherwise make a correct-looking password fail with no visible cause.
+  const expected = (process.env.ADMIN_PASSWORD ?? '').trim()
   if (typeof candidate !== 'string' || !expected) return false
 
   const a = Buffer.from(candidate)

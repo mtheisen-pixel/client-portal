@@ -4,13 +4,12 @@ import { supabase } from '../lib/supabaseClient'
 import { adminApi } from '../lib/adminApi'
 import type { AdminClient, AdminDocument } from '../lib/adminApi'
 
-const PASSWORD_KEY = 'portal_admin_password'
-
 export function Admin() {
-  const [password, setPassword] = useState(() => sessionStorage.getItem(PASSWORD_KEY) ?? '')
+  const [password, setPassword] = useState('')
   const [unlocked, setUnlocked] = useState(false)
   const [passwordInput, setPasswordInput] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
+  const [checkingPassword, setCheckingPassword] = useState(false)
 
   const [clients, setClients] = useState<AdminClient[]>([])
   const [selectedClientId, setSelectedClientId] = useState<string>('')
@@ -18,22 +17,18 @@ export function Admin() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    if (password) tryUnlock(password)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   async function tryUnlock(candidate: string) {
     setAuthError(null)
+    setCheckingPassword(true)
     try {
       const { clients } = await adminApi.listClients(candidate)
       setClients(clients)
       setPassword(candidate)
-      sessionStorage.setItem(PASSWORD_KEY, candidate)
       setUnlocked(true)
     } catch (err) {
-      sessionStorage.removeItem(PASSWORD_KEY)
       setAuthError(err instanceof Error ? err.message : 'Could not unlock admin.')
+    } finally {
+      setCheckingPassword(false)
     }
   }
 
@@ -149,7 +144,9 @@ export function Admin() {
             required
           />
           {authError && <p className="error">{authError}</p>}
-          <button type="submit">Unlock</button>
+          <button type="submit" disabled={checkingPassword}>
+            {checkingPassword ? 'Checking…' : 'Unlock'}
+          </button>
         </form>
       </div>
     )
