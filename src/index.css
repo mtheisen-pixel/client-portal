@@ -66,6 +66,9 @@ a {
 
 /* Wordmark: navy "brand"/"fy", teal "ai" */
 .logo-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 1.35rem;
   font-weight: 800;
   color: var(--navy);
@@ -74,6 +77,12 @@ a {
 
 .logo-wordmark .logo-ai {
   color: var(--teal);
+}
+
+.logo-mark {
+  width: 0.85em;
+  height: 1.1em;
+  color: var(--navy);
 }
 
 .site-header {
