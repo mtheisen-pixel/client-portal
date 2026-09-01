@@ -134,7 +134,7 @@ export function Admin() {
   if (!unlocked) {
     return (
       <div className="page-center">
-        <Logo />
+        <Logo large />
         <form className="card" onSubmit={handlePasswordSubmit}>
           <span className="eyebrow">Admin</span>
           <h1>Enter password</h1>

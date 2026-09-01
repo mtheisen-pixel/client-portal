@@ -27,7 +27,7 @@ export function Login() {
 
   return (
     <div className="page-center">
-      <Logo />
+      <Logo large />
       <form className="card" onSubmit={handleSubmit}>
         <span className="eyebrow">Client Portal</span>
         <h1>Sign in</h1>
