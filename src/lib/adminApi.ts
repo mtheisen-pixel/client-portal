@@ -1,10 +1,13 @@
 const ENDPOINT = '/.netlify/functions/admin'
 
 async function call<T>(password: string, action: string, payload: Record<string, unknown> = {}) {
+  // password/action are spread last so a payload field can never shadow them
+  // (this previously broke createClient, whose payload also carries a
+  // "password" field for the new client's own login password).
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password, action, ...payload }),
+    body: JSON.stringify({ ...payload, password, action }),
   })
 
   const data = await res.json()
@@ -35,7 +38,7 @@ export const adminApi = {
   createClient: (password: string, email: string, clientPassword: string, companyName: string) =>
     call<{ client: AdminClient }>(password, 'create_client', {
       email,
-      password: clientPassword,
+      clientPassword,
       companyName,
     }),
 

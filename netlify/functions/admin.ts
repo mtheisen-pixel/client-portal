@@ -60,18 +60,18 @@ export const handler: Handler = async (event) => {
       }
 
       case 'create_client': {
-        const { email, password, companyName } = body as {
+        const { email, clientPassword, companyName } = body as {
           email?: string
-          password?: string
+          clientPassword?: string
           companyName?: string
         }
-        if (!email || !password || !companyName) {
-          return json(400, { error: 'email, password, and companyName are required.' })
+        if (!email || !clientPassword || !companyName) {
+          return json(400, { error: 'email, clientPassword, and companyName are required.' })
         }
 
         const { data: userData, error: userError } = await supabaseAdmin.auth.admin.createUser({
           email,
-          password,
+          password: clientPassword,
           email_confirm: true,
         })
         if (userError) throw userError
