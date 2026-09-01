@@ -5,6 +5,7 @@ import { adminApi } from '../lib/adminApi'
 import type { AdminClient, AdminDocument } from '../lib/adminApi'
 import { Logo } from '../components/Logo'
 import { SiteHeader } from '../components/SiteHeader'
+import { DOCUMENT_CATEGORIES } from '../lib/categories'
 
 export function Admin() {
   const [password, setPassword] = useState('')
@@ -232,7 +233,16 @@ export function Admin() {
                 <input id="description" name="description" />
 
                 <label htmlFor="category">Category</label>
-                <input id="category" name="category" placeholder="e.g. Brand Guide" />
+                <select id="category" name="category" defaultValue="" required>
+                  <option value="" disabled>
+                    Select a category…
+                  </option>
+                  {DOCUMENT_CATEGORIES.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
 
                 <label htmlFor="sortOrder">Sort order</label>
                 <input id="sortOrder" name="sortOrder" type="number" defaultValue={0} />

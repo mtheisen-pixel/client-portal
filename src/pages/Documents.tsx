@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 import { SiteHeader } from '../components/SiteHeader'
+import { CATEGORY_SECTION_ORDER } from '../lib/categories'
 
 interface DocumentRow {
   id: string
@@ -101,24 +102,36 @@ export function Documents() {
         ) : docs.length === 0 ? (
           <p className="muted">No documents have been shared with you yet.</p>
         ) : (
-          <ul className="doc-list">
-            {docs.map((doc) => (
-              <li key={doc.id} className="doc-row">
-                <div>
-                  <div className="doc-title">{doc.title}</div>
-                  {doc.category && <span className="badge">{doc.category}</span>}
-                  {doc.description && <p className="muted">{doc.description}</p>}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleDownload(doc)}
-                  disabled={downloadingId === doc.id}
-                >
-                  {downloadingId === doc.id ? 'Downloading…' : 'Download'}
-                </button>
-              </li>
-            ))}
-          </ul>
+          CATEGORY_SECTION_ORDER.map((category) => {
+            const docsInCategory = docs
+              .filter((doc) => doc.category === category)
+              .sort((a, b) => a.sort_order - b.sort_order)
+
+            if (docsInCategory.length === 0) return null
+
+            return (
+              <section key={category}>
+                <h3>{category}</h3>
+                <ul className="doc-list">
+                  {docsInCategory.map((doc) => (
+                    <li key={doc.id} className="doc-row">
+                      <div>
+                        <div className="doc-title">{doc.title}</div>
+                        {doc.description && <p className="muted">{doc.description}</p>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDownload(doc)}
+                        disabled={downloadingId === doc.id}
+                      >
+                        {downloadingId === doc.id ? 'Downloading…' : 'Download'}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )
+          })
         )}
       </div>
     </>
