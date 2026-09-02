@@ -119,6 +119,17 @@ export function Admin() {
     }
   }
 
+  function handleLogout() {
+    setUnlocked(false)
+    setPassword('')
+    setPasswordInput('')
+    setClients([])
+    setSelectedClientId('')
+    setDocs([])
+    setError(null)
+    setAuthError(null)
+  }
+
   async function handleDelete(doc: AdminDocument) {
     if (!confirm(`Delete "${doc.title}"? This cannot be undone.`)) return
     setError(null)
@@ -164,6 +175,9 @@ export function Admin() {
         <span className="eyebrow" style={{ margin: 0 }}>
           Admin
         </span>
+        <button type="button" className="secondary" onClick={handleLogout}>
+          Log out
+        </button>
       </SiteHeader>
 
       <div className="page">
