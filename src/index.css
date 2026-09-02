@@ -203,6 +203,29 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.success {
+  color: var(--teal-dark);
+  font-size: 0.9rem;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: var(--teal);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.link-button:hover {
+  color: var(--teal-dark);
+  background: none;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -237,6 +260,7 @@ button:disabled {
 .badge {
   display: inline-block;
   margin-top: 4px;
+  margin-right: 6px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 0.7rem;
@@ -245,4 +269,26 @@ button:disabled {
   background: var(--teal-tint);
   border-radius: 4px;
   padding: 3px 8px;
+}
+
+.badge-hidden {
+  color: var(--faint);
+  background: var(--tint);
+  border: 1px solid var(--line);
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--body);
+}
+
+.checkbox-field input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--teal);
 }

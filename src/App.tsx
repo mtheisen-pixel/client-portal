@@ -4,6 +4,7 @@ import { ProtectedRoute } from './routes/ProtectedRoute'
 import { Login } from './pages/Login'
 import { Documents } from './pages/Documents'
 import { Admin } from './pages/Admin'
+import { ResetPassword } from './pages/ResetPassword'
 
 function App() {
   return (
@@ -11,6 +12,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/documents" replace />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route
           path="/documents"
           element={

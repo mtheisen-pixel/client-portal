@@ -30,6 +30,7 @@ export interface AdminDocument {
   file_path: string
   sort_order: number
   created_at: string
+  admin_only: boolean
 }
 
 export const adminApi = {
@@ -57,6 +58,7 @@ export const adminApi = {
       category?: string
       filePath: string
       sortOrder?: number
+      adminOnly?: boolean
     },
   ) => call<{ document: AdminDocument }>(password, 'create_document', args),
 

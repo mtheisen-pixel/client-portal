@@ -107,6 +107,7 @@ export function Admin() {
         category: String(fd.get('category') ?? ''),
         filePath: path,
         sortOrder: Number(fd.get('sortOrder') ?? 0),
+        adminOnly: fd.get('adminOnly') === 'on',
       })
 
       form.reset()
@@ -210,6 +211,7 @@ export function Admin() {
                     <div>
                       <div className="doc-title">{doc.title}</div>
                       {doc.category && <span className="badge">{doc.category}</span>}
+                      {doc.admin_only && <span className="badge badge-hidden">Hidden</span>}
                     </div>
                     <button
                       type="button"
@@ -249,6 +251,11 @@ export function Admin() {
 
                 <label htmlFor="file">File</label>
                 <input id="file" name="file" type="file" required />
+
+                <label className="checkbox-field">
+                  <input id="adminOnly" name="adminOnly" type="checkbox" />
+                  Admin only (hidden from client)
+                </label>
 
                 <button type="submit" disabled={busy}>
                   {busy ? 'Uploading…' : 'Upload'}
