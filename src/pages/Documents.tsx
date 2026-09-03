@@ -31,7 +31,10 @@ export function Documents() {
 
       const [clientResult, docsResult] = await Promise.all([
         supabase.from('portal_clients').select('company_name').single(),
-        supabase.from('portal_documents').select('*').order('sort_order'),
+        // Research documents are always internal-only here, regardless of
+        // admin_only — excluded at the query itself, not just left out of
+        // CATEGORY_SECTION_ORDER, so they never even reach component state.
+        supabase.from('portal_documents').select('*').neq('category', 'Research').order('sort_order'),
       ])
 
       if (cancelled) return

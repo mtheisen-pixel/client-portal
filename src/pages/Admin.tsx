@@ -259,6 +259,10 @@ export function Admin() {
                     </option>
                   ))}
                 </select>
+                <p className="muted" style={{ marginTop: 4 }}>
+                  Research documents are always internal-only — the client never sees them,
+                  regardless of the &quot;Admin only&quot; checkbox below.
+                </p>
 
                 <label htmlFor="sortOrder">Sort order</label>
                 <input id="sortOrder" name="sortOrder" type="number" defaultValue={0} />
