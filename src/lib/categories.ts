@@ -8,6 +8,7 @@ export const DOCUMENT_CATEGORIES = [
   '90-Day Plan',
   'Brand Guide',
   'Report',
+  'Research',
   'Contract',
   'Other',
 ] as const
@@ -16,6 +17,7 @@ export const DOCUMENT_CATEGORIES = [
 export const CATEGORY_SECTION_ORDER = [
   'Process Overview',
   'Audit / Assessment',
+  'Research',
   '90-Day Plan',
   'Deliverable',
   'Brand Guide',
