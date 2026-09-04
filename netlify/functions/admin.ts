@@ -1,6 +1,6 @@
-import type { Handler, HandlerEvent } from '@netlify/functions'
+import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
-import { timingSafeEqual } from 'node:crypto'
+import { authorizeAdminRequest } from './lib/auth'
 
 // This function is the only place the service_role key is used. It bypasses
 // Row Level Security entirely, so every request must present the shared
@@ -12,65 +12,9 @@ const supabaseAdmin = createClient(
 )
 
 const BUCKET = 'client-documents'
-const MAX_FAILED_ATTEMPTS = 5
-const LOCKOUT_MS = 15 * 60 * 1000
-
-function checkPassword(candidate: unknown): candidate is string {
-  // .trim() guards against a trailing newline/space in the env var value,
-  // a common artifact of pasting into Netlify's env var UI, which would
-  // otherwise make a correct-looking password fail with no visible cause.
-  const expected = (process.env.ADMIN_PASSWORD ?? '').trim()
-  if (typeof candidate !== 'string' || !expected) return false
-
-  const a = Buffer.from(candidate)
-  const b = Buffer.from(expected)
-  if (a.length !== b.length) return false
-  return timingSafeEqual(a, b)
-}
 
 function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_')
-}
-
-function getClientIp(event: HandlerEvent): string {
-  const headers = event.headers ?? {}
-  const direct = headers['x-nf-client-connection-ip'] ?? headers['client-ip']
-  if (direct) return direct
-  const forwarded = headers['x-forwarded-for']
-  if (forwarded) return forwarded.split(',')[0].trim()
-  return 'unknown'
-}
-
-interface Lockout {
-  failed_count: number
-  locked_until: string | null
-}
-
-async function getLockout(ip: string): Promise<Lockout | null> {
-  const { data } = await supabaseAdmin
-    .from('admin_lockouts')
-    .select('failed_count, locked_until')
-    .eq('ip', ip)
-    .maybeSingle()
-  return data
-}
-
-async function recordFailedAttempt(ip: string, existing: Lockout | null) {
-  const lockoutExpired = existing?.locked_until && new Date(existing.locked_until) <= new Date()
-  const failedCount = !existing || lockoutExpired ? 1 : existing.failed_count + 1
-  const lockedUntil =
-    failedCount >= MAX_FAILED_ATTEMPTS ? new Date(Date.now() + LOCKOUT_MS).toISOString() : null
-
-  await supabaseAdmin.from('admin_lockouts').upsert({
-    ip,
-    failed_count: failedCount,
-    locked_until: lockedUntil,
-    updated_at: new Date().toISOString(),
-  })
-}
-
-async function clearLockout(ip: string) {
-  await supabaseAdmin.from('admin_lockouts').delete().eq('ip', ip)
 }
 
 export const handler: Handler = async (event) => {
@@ -85,22 +29,8 @@ export const handler: Handler = async (event) => {
     return { statusCode: 400, body: 'Invalid JSON' }
   }
 
-  const ip = getClientIp(event)
-  const lockout = await getLockout(ip)
-
-  if (lockout?.locked_until && new Date(lockout.locked_until) > new Date()) {
-    const minutesLeft = Math.ceil((new Date(lockout.locked_until).getTime() - Date.now()) / 60000)
-    return json(429, {
-      error: `Too many failed attempts. Try again in ${minutesLeft} minute${minutesLeft === 1 ? '' : 's'}.`,
-    })
-  }
-
-  if (!checkPassword(body.password)) {
-    await recordFailedAttempt(ip, lockout)
-    return json(401, { error: 'Incorrect admin password.' })
-  }
-
-  await clearLockout(ip)
+  const authError = await authorizeAdminRequest(supabaseAdmin, event, body.password)
+  if (authError) return json(authError.statusCode, { error: authError.error })
 
   const action = body.action
 

@@ -19,6 +19,8 @@ export function Admin() {
   const [docs, setDocs] = useState<AdminDocument[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [auditBusy, setAuditBusy] = useState(false)
+  const [auditStatus, setAuditStatus] = useState<string | null>(null)
 
   async function tryUnlock(candidate: string) {
     setAuthError(null)
@@ -116,6 +118,30 @@ export function Admin() {
       setError(err instanceof Error ? err.message : 'Upload failed.')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function handleRunWebsiteAudit(e: FormEvent) {
+    const form = e.currentTarget as HTMLFormElement
+    e.preventDefault()
+    if (!selectedClientId) return
+    setError(null)
+    setAuditStatus(null)
+    setAuditBusy(true)
+
+    try {
+      const fd = new FormData(form)
+      const url = String(fd.get('websiteUrl') ?? '').trim()
+      if (!url) throw new Error('Enter a URL to audit.')
+
+      const { pagesCrawled } = await adminApi.runWebsiteAudit(password, selectedClientId, url)
+      setAuditStatus(`Done — crawled ${pagesCrawled} page(s) and saved the results as Research documents.`)
+      form.reset()
+      await refreshDocs(selectedClientId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Website audit failed.')
+    } finally {
+      setAuditBusy(false)
     }
   }
 
@@ -279,6 +305,28 @@ export function Admin() {
                   {busy ? 'Uploading…' : 'Upload'}
                 </button>
               </form>
+
+              <h3>Run a website audit</h3>
+              <p className="muted" style={{ marginTop: 4 }}>
+                Crawls a small set of pages on the site, pulls page copy and a rough color/font
+                summary, and saves the result as Research documents (a text summary plus a few
+                page screenshots) — same as uploading them by hand, just automated.
+              </p>
+              <form onSubmit={handleRunWebsiteAudit} className="stacked-form">
+                <label htmlFor="websiteUrl">Website URL</label>
+                <input
+                  id="websiteUrl"
+                  name="websiteUrl"
+                  type="url"
+                  placeholder="https://example.com"
+                  required
+                />
+
+                <button type="submit" disabled={auditBusy}>
+                  {auditBusy ? 'Running audit…' : 'Run Website Audit'}
+                </button>
+              </form>
+              {auditStatus && <p className="muted">{auditStatus}</p>}
             </>
           )}
         </section>
