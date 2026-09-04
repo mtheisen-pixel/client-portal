@@ -66,6 +66,9 @@ export const adminApi = {
   deleteDocument: (password: string, documentId: string, filePath: string) =>
     call<{ ok: true }>(password, 'delete_document', { documentId, filePath }),
 
+  getDownloadUrl: (password: string, filePath: string) =>
+    call<{ url: string }>(password, 'get_download_url', { filePath }),
+
   // Separate endpoint, not the action-dispatched `call` above — a crawl can
   // run much longer than admin.ts's other near-instant operations, see
   // netlify/functions/website-audit.ts. A non-empty competitorName runs the
