@@ -113,19 +113,45 @@ function sameOrigin(url: URL, origin: string): boolean {
   return url.origin === origin;
 }
 
+// Excludes obvious non-page resources from ever being treated as a
+// crawlable "page" — most importantly .xml, since a sitemap.xml is very
+// often a *sitemap index* (a list of OTHER sitemap files, e.g. Yoast/
+// RankMath's post-sitemap.xml, page-sitemap.xml) rather than a list of
+// actual pages, and naively rendering one of those in a browser wastes a
+// request and produces garbage "page copy".
+const NON_PAGE_EXTENSION_RE = /\.(xml|pdf|jpg|jpeg|png|gif|svg|webp|zip|css|js|json|ico|txt|xsl)$/i;
+
+async function fetchSitemapLocs(url: string, origin: string): Promise<string[]> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!res.ok) return [];
+  const xml = await res.text();
+  const locs = [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
+  return locs.filter((href) => {
+    try {
+      return sameOrigin(new URL(href), origin);
+    } catch {
+      return false;
+    }
+  });
+}
+
 async function discoverFromSitemap(origin: string): Promise<string[]> {
   try {
-    const res = await fetch(`${origin}/sitemap.xml`, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return [];
-    const xml = await res.text();
-    const locs = [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
-    return locs.filter((href) => {
-      try {
-        return sameOrigin(new URL(href), origin);
-      } catch {
-        return false;
-      }
-    });
+    const topLevel = await fetchSitemapLocs(`${origin}/sitemap.xml`, origin);
+    if (topLevel.length === 0) return [];
+
+    // A sitemap *index* points entirely at other .xml sitemap files rather
+    // than real pages (this is the common case for WordPress + an SEO
+    // plugin) — follow a small, capped number of those sub-sitemaps and use
+    // their <loc> entries as the actual page candidates instead.
+    const looksLikeIndex = topLevel.every((href) => NON_PAGE_EXTENSION_RE.test(new URL(href).pathname));
+    if (!looksLikeIndex) {
+      return topLevel.filter((href) => !NON_PAGE_EXTENSION_RE.test(new URL(href).pathname));
+    }
+
+    const subSitemaps = topLevel.slice(0, 3);
+    const nested = await Promise.all(subSitemaps.map((href) => fetchSitemapLocs(href, origin).catch(() => [])));
+    return nested.flat().filter((href) => !NON_PAGE_EXTENSION_RE.test(new URL(href).pathname));
   } catch {
     return [];
   }
@@ -141,7 +167,9 @@ async function discoverFromHomepageLinks(origin: string): Promise<string[]> {
     for (const href of hrefs) {
       try {
         const resolved = new URL(href, origin);
-        if (sameOrigin(resolved, origin)) urls.add(resolved.toString());
+        if (sameOrigin(resolved, origin) && !NON_PAGE_EXTENSION_RE.test(resolved.pathname)) {
+          urls.add(resolved.toString());
+        }
       } catch {
         // ignore unparseable hrefs (mailto:, javascript:, etc.)
       }
@@ -167,7 +195,8 @@ export async function discoverPages(siteUrl: string): Promise<string[]> {
 
   const allowed = candidates.filter((href) => {
     try {
-      return isAllowedByRobots(new URL(href).pathname, robotsRules);
+      const url = new URL(href);
+      return !NON_PAGE_EXTENSION_RE.test(url.pathname) && isAllowedByRobots(url.pathname, robotsRules);
     } catch {
       return false;
     }
