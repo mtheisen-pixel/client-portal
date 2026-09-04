@@ -42,7 +42,19 @@ export interface PageSpeedResult {
   performanceScore: number | null;
   accessibilityScore: number | null;
   lcp: string | null;
-  inp: string | null;
+  /**
+   * Total Blocking Time (Lighthouse audit id "total-blocking-time") —
+   * Google's own recommended LAB-data proxy for INP, not literal INP
+   * itself. Real INP needs Chrome UX Report field data from actual visitors
+   * (INTERACTION_TO_NEXT_PAINT in PSI's loadingExperience block), which
+   * this app doesn't request/parse — a low-traffic site like most of this
+   * tool's targets often has no CrUX field data available at all, and PSI
+   * silently omits loadingExperience in that case rather than erroring, so
+   * there's nothing to fall back to. TBT is milliseconds, like real INP —
+   * unlike the previous, mislabeled field here (Lighthouse's "interactive"
+   * audit, i.e. Time to Interactive, which is seconds-range and unrelated).
+   */
+  tbt: string | null;
   cls: string | null;
   totalByteWeight: string | null;
   mobileFriendly: boolean | null;
@@ -165,7 +177,12 @@ export async function runPageSpeedInsights(url: string): Promise<PageSpeedResult
     performanceScore: toPercent(categories.performance?.score),
     accessibilityScore: toPercent(categories.accessibility?.score),
     lcp: audits["largest-contentful-paint"]?.displayValue ?? null,
-    inp: audits["interactive"]?.displayValue ?? audits["max-potential-fid"]?.displayValue ?? null,
+    // "total-blocking-time" is Google's own recommended lab proxy for INP.
+    // The previous code read audits["interactive"] (Time to Interactive) —
+    // a real Lighthouse audit, but a seconds-range page-load metric with no
+    // relationship to interaction responsiveness, which is why it showed
+    // implausible ~12s "INP" values sitting right next to a ~12s LCP.
+    tbt: audits["total-blocking-time"]?.displayValue ?? audits["max-potential-fid"]?.displayValue ?? null,
     cls: audits["cumulative-layout-shift"]?.displayValue ?? null,
     totalByteWeight: audits["total-byte-weight"]?.displayValue ?? null,
     mobileFriendly: viewportAudit ? viewportAudit.score === 1 : null,
@@ -187,7 +204,7 @@ export function buildPageSpeedMarkdown(auditLabel: string, result: PageSpeedResu
     "## Core Web Vitals",
     "",
     `- Largest Contentful Paint (LCP): ${result.lcp ?? "n/a"}`,
-    `- Interactivity (INP proxy): ${result.inp ?? "n/a"}`,
+    `- Total Blocking Time (TBT — lab-data proxy for INP, not measured field data): ${result.tbt ?? "n/a"}`,
     `- Cumulative Layout Shift (CLS): ${result.cls ?? "n/a"}`,
     `- Total page weight: ${result.totalByteWeight ?? "n/a"}`,
     `- Mobile-friendly (viewport configured correctly): ${result.mobileFriendly === null ? "n/a" : result.mobileFriendly ? "yes" : "no"}`,

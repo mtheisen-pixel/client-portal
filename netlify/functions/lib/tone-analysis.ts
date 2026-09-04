@@ -10,14 +10,22 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 let cachedClient: Anthropic | null = null;
+/** Set once, the first time anthropicClient() reads the env var — a masked (never the real secret) diagnostic for describeAnthropicFailure, since a bare "was rejected" gives no way to tell "no key at all" from "some wrong/corrupted value" from "the right key, wrong deploy context" apart. */
+let lastApiKeyDiagnostic = "(never read)";
 
 function anthropicClient(): Anthropic {
   if (cachedClient) return cachedClient;
-  // Trimmed defensively — a key pasted into Netlify's env var UI with a
-  // trailing newline/space (easy to pick up from a copy-paste) is a common,
-  // otherwise-invisible cause of a 401 "invalid x-api-key" that looks like a
-  // wrong key when it's actually just whitespace corruption.
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  const rawKey = process.env.ANTHROPIC_API_KEY;
+  // Stripped to printable ASCII, not just .trim()'d — a real key is plain
+  // ASCII (letters/digits/hyphens), and .trim() alone still failed on a live
+  // retest with the identical "invalid x-api-key" error, which points at
+  // something .trim() doesn't catch: a non-whitespace invisible character
+  // (a smart quote, zero-width space, or BOM picked up from copy-pasting
+  // into Netlify's env var UI) rather than plain leading/trailing
+  // whitespace. This removes any character outside the printable-ASCII
+  // range instead of only leading/trailing whitespace.
+  const apiKey = rawKey?.replace(/[^\x21-\x7e]/g, "");
+  lastApiKeyDiagnostic = apiKey ? `key read: starts with "${apiKey.slice(0, 8)}", ${apiKey.length} chars` : "no ANTHROPIC_API_KEY value found in this function's environment";
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY is not set — tone analysis needs an Anthropic API key configured on this Netlify site.");
   }
@@ -35,7 +43,7 @@ function anthropicClient(): Anthropic {
  */
 export function describeAnthropicFailure(err: unknown, checkLabel: string): string {
   if (err instanceof Anthropic.AuthenticationError) {
-    return `${checkLabel} unavailable — the Anthropic API key configured on this Netlify site was rejected. Check that ANTHROPIC_API_KEY is set correctly (and in the right deploy context).`;
+    return `${checkLabel} unavailable — the Anthropic API key configured on this Netlify site was rejected (${lastApiKeyDiagnostic}). Netlify scopes environment variables per deploy context (Production / Deploy Previews / Branch deploys can each have a different value, or none at all) — confirm ANTHROPIC_API_KEY is set for the specific context this function is actually running in, and that the key itself is still active in the Anthropic Console.`;
   }
   const message = err instanceof Error ? err.message : "unknown error";
   return `${checkLabel} unavailable — ${message}`;

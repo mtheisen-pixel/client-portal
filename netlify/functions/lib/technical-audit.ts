@@ -92,6 +92,46 @@ interface NapInfo {
   address: string | null;
 }
 
+/**
+ * Descends into `@graph` — the wrapper Yoast SEO and many other WordPress
+ * schema plugins use to bundle several typed nodes (WebSite, Organization,
+ * LocalBusiness, ...) into one JSON-LD block — so a real node nested inside
+ * isn't invisible to callers that only look at the top level. Without this,
+ * a perfectly valid, type-rich `@graph` document reads as "no @type found"
+ * everywhere the parsed object's own top-level `@type` is checked, even
+ * though real schema is right there one level down. Handles a single
+ * object, an array of objects, and any nesting depth of `@graph`. Shared by
+ * extractJsonLdTypes (Structured Data) and extractNap (Local SEO) so both
+ * sections read the same underlying nodes and can't disagree with each
+ * other about what schema is actually present.
+ */
+function flattenJsonLdNodes(parsed: unknown): Record<string, unknown>[] {
+  const nodes: Record<string, unknown>[] = [];
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const obj = value as Record<string, unknown>;
+    nodes.push(obj);
+    if (obj["@graph"] !== undefined) visit(obj["@graph"]);
+  };
+  visit(parsed);
+  return nodes;
+}
+
+/** All `@type` values found across a parsed JSON-LD document (including inside @graph), deduped. `@type` can be a single string or an array of strings on any one node — schema.org allows multi-type nodes (e.g. a LocalBusiness that's also a Store). */
+function extractJsonLdTypes(parsed: unknown): string[] {
+  const types = flattenJsonLdNodes(parsed).flatMap((node) => {
+    const t = node["@type"];
+    if (typeof t === "string") return [t];
+    if (Array.isArray(t)) return t.filter((x): x is string => typeof x === "string");
+    return [];
+  });
+  return [...new Set(types)];
+}
+
 /** Prefers structured data (JSON-LD `name`/`address`, `tel:` links) over free-text scanning — much more reliable, and free-text address extraction from arbitrary page copy isn't reliable enough to be worth attempting. Free-text phone matching is kept as a fallback since not every site marks up its phone number as a tel: link. */
 function extractNap(html: string): NapInfo {
   let name: string | null = null;
@@ -99,9 +139,7 @@ function extractNap(html: string): NapInfo {
   for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
     try {
       const parsed = JSON.parse(m[1].trim());
-      const nodes = Array.isArray(parsed) ? parsed : [parsed];
-      for (const node of nodes) {
-        if (!node || typeof node !== "object") continue;
+      for (const node of flattenJsonLdNodes(parsed)) {
         if (!name && typeof node.name === "string") name = node.name;
         if (!address && node.address && typeof node.address === "object") {
           const a = node.address as Record<string, unknown>;
@@ -165,7 +203,7 @@ const VERTICAL_SCHEMA_HINTS: { keywords: string[]; type: string; label: string }
 ];
 
 function analyzeLocalBusinessSchema(pages: PageReport[], lowerHomepageText: string): string[] {
-  const allTypes = [...new Set(pages.flatMap((p) => p.jsonLd.filter((b) => b.valid && b.type).map((b) => b.type as string)))];
+  const allTypes = [...new Set(pages.flatMap((p) => p.jsonLd.filter((b) => b.valid).flatMap((b) => b.types)))];
   const notes: string[] = [];
   notes.push(allTypes.length > 0 ? `Schema type(s) found: ${allTypes.join(", ")}.` : "No structured data (JSON-LD) types found on the pages checked.");
 
@@ -257,7 +295,7 @@ interface PageReport {
   imgWithAlt: number;
   ogTags: Record<string, string>;
   twitterTags: Record<string, string>;
-  jsonLd: { type: string | null; valid: boolean }[];
+  jsonLd: { types: string[]; valid: boolean }[];
   internalLinks: string[];
   wordCount: number;
   nap: NapInfo;
@@ -290,10 +328,9 @@ function analyzePage(url: string, html: string): PageReport {
   const jsonLd = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].map((m) => {
     try {
       const parsed = JSON.parse(m[1].trim());
-      const type = Array.isArray(parsed) ? (parsed[0]?.["@type"] ?? null) : (parsed?.["@type"] ?? null);
-      return { type, valid: true };
+      return { types: extractJsonLdTypes(parsed), valid: true };
     } catch {
-      return { type: null, valid: false };
+      return { types: [], valid: false };
     }
   });
 
@@ -670,7 +707,11 @@ export async function runTechnicalAuditFast(siteUrl: string, discoveredPages: st
   const altCoveragePct = totalImgs > 0 ? Math.round((imgsWithAlt / totalImgs) * 100) : null;
 
   const jsonLdSummary = pages.flatMap((p) =>
-    p.jsonLd.map((block) => (block.valid ? `${p.url}: ${block.type ?? "unknown type"} schema found.` : `${p.url}: JSON-LD block present but failed to parse as valid JSON.`))
+    p.jsonLd.map((block) =>
+      block.valid
+        ? `${p.url}: ${block.types.length > 0 ? block.types.join(", ") : "unknown type"} schema found.`
+        : `${p.url}: JSON-LD block present but failed to parse as valid JSON.`
+    )
   );
 
   const semanticNotes = checkSemanticHtml(httpsRes?.text ?? "");
