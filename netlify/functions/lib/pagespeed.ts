@@ -5,9 +5,17 @@
 // server-side and commonly takes 15-30+ seconds to respond, which alone
 // can approach or exceed Netlify's ~30s function limit on this plan — so
 // it never gets bundled into the same request as anything else. One PSI
-// call also already covers performance, mobile-friendliness, and
-// accessibility (Lighthouse's accessibility category runs axe-core
-// internally), so no separate accessibility-scanning dependency is needed.
+// call also covers performance, mobile-friendliness, and accessibility
+// (Lighthouse's accessibility category runs axe-core internally), so no
+// separate accessibility-scanning dependency is needed.
+//
+// Only performance + accessibility are requested (not best-practices/seo,
+// which PSI can also return) — live testing showed the full 4-category
+// request running long enough to hit Netlify's limit on its own; fewer
+// categories means less Lighthouse audit work on Google's end. This
+// reduces the timeout risk, it doesn't eliminate it — PSI's own response
+// time is otherwise outside this app's control and can still occasionally
+// run long regardless.
 //
 // Needs a Google PageSpeed Insights API key (free, Google Cloud Console —
 // enable the "PageSpeed Insights API") set as PAGESPEED_API_KEY.
@@ -24,8 +32,6 @@ interface PageSpeedApiResponse {
     categories?: {
       performance?: { score: number | null };
       accessibility?: { score: number | null };
-      "best-practices"?: { score: number | null };
-      seo?: { score: number | null };
     };
     audits?: Record<string, LighthouseAudit>;
   };
@@ -35,8 +41,6 @@ export interface PageSpeedResult {
   url: string;
   performanceScore: number | null;
   accessibilityScore: number | null;
-  bestPracticesScore: number | null;
-  seoScore: number | null;
   lcp: string | null;
   inp: string | null;
   cls: string | null;
@@ -73,7 +77,15 @@ export async function runPageSpeedInsights(url: string): Promise<PageSpeedResult
   endpoint.searchParams.set("url", url);
   endpoint.searchParams.set("key", apiKey);
   endpoint.searchParams.set("strategy", "mobile");
-  for (const category of ["performance", "accessibility", "best-practices", "seo"]) {
+  // Only the two categories the spec actually asked for (Core Web Vitals +
+  // accessibility) — live testing showed the full 4-category request
+  // (this plus best-practices/seo) can run long enough to hit Netlify's
+  // ~30s request limit. Fewer categories means less Lighthouse audit work
+  // on Google's end, which is the only lever available here (PSI's own
+  // response time isn't otherwise configurable). best-practices/seo scores
+  // were a bonus, not something asked for — losing them is the right
+  // trade against reliability.
+  for (const category of ["performance", "accessibility"]) {
     endpoint.searchParams.append("category", category);
   }
 
@@ -95,8 +107,6 @@ export async function runPageSpeedInsights(url: string): Promise<PageSpeedResult
     url,
     performanceScore: toPercent(categories.performance?.score),
     accessibilityScore: toPercent(categories.accessibility?.score),
-    bestPracticesScore: toPercent(categories["best-practices"]?.score),
-    seoScore: toPercent(categories.seo?.score),
     lcp: audits["largest-contentful-paint"]?.displayValue ?? null,
     inp: audits["interactive"]?.displayValue ?? audits["max-potential-fid"]?.displayValue ?? null,
     cls: audits["cumulative-layout-shift"]?.displayValue ?? null,
@@ -116,8 +126,6 @@ export function buildPageSpeedMarkdown(auditLabel: string, result: PageSpeedResu
     "",
     `- Performance: ${result.performanceScore ?? "n/a"}`,
     `- Accessibility: ${result.accessibilityScore ?? "n/a"}`,
-    `- Best Practices: ${result.bestPracticesScore ?? "n/a"}`,
-    `- SEO: ${result.seoScore ?? "n/a"}`,
     "",
     "## Core Web Vitals",
     "",
