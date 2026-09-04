@@ -134,18 +134,25 @@ export function Admin() {
       const url = String(fd.get('websiteUrl') ?? '').trim()
       if (!url) throw new Error('Enter a URL to audit.')
       const competitorName = String(fd.get('competitorName') ?? '').trim()
+      const auditType = (String(fd.get('auditType') ?? 'creative') === 'technical' ? 'technical' : 'creative') as
+        | 'creative'
+        | 'technical'
+      const label = competitorName ? `Competitor Audit for "${competitorName}"` : 'Website Audit'
 
-      const { pagesCrawled } = await adminApi.runWebsiteAudit(
-        password,
-        selectedClientId,
-        url,
-        competitorName || undefined
-      )
-      setAuditStatus(
-        competitorName
-          ? `Done — crawled ${pagesCrawled} page(s) and saved as a Competitor Audit for "${competitorName}".`
-          : `Done — crawled ${pagesCrawled} page(s) and saved the results as Research documents.`
-      )
+      if (auditType === 'creative') {
+        const { pagesCrawled } = await adminApi.runWebsiteAudit(password, selectedClientId, url, competitorName || undefined, 'creative')
+        setAuditStatus(`Done — crawled ${pagesCrawled} page(s) and saved as a Creative ${label}.`)
+      } else {
+        // Two sequential requests, not one — the performance check
+        // (PageSpeed Insights) runs long enough on its own that bundling it
+        // with the fast checks risks the ~30s Netlify limit. See the doc
+        // comment at the top of website-audit.ts.
+        setAuditStatus('Running technical checks…')
+        const fastResult = await adminApi.runWebsiteAudit(password, selectedClientId, url, competitorName || undefined, 'technical', 'fast')
+        setAuditStatus(`Technical checks done (${fastResult.pagesCrawled} page(s)) — running performance check…`)
+        await adminApi.runWebsiteAudit(password, selectedClientId, url, competitorName || undefined, 'technical', 'performance')
+        setAuditStatus(`Done — saved a Technical ${label}, including a performance check.`)
+      }
       form.reset()
       await refreshDocs(selectedClientId)
     } catch (err) {
@@ -337,9 +344,8 @@ export function Admin() {
 
               <h3>Run a website audit</h3>
               <p className="muted" style={{ marginTop: 4 }}>
-                Crawls a small set of pages on the site, pulls page copy and a rough color/font
-                summary, and saves the result as Research documents (a text summary plus a few
-                page screenshots) — same as uploading them by hand, just automated. Leave
+                Crawls a small set of pages on the site and saves the result as Research
+                documents — same as uploading them by hand, just automated. Leave
                 &quot;Competitor name&quot; blank to audit the client&apos;s own site, or fill it in
                 to audit a named competitor&apos;s site instead — run it once per competitor.
               </p>
@@ -359,6 +365,16 @@ export function Admin() {
                   name="competitorName"
                   placeholder="Leave blank for the client's own site — or name a competitor, e.g. Parachute"
                 />
+
+                <label>Audit type</label>
+                <label className="checkbox-field">
+                  <input type="radio" name="auditType" value="creative" defaultChecked />
+                  Creative Audit — page copy, color/font summary, screenshots, perceived tone
+                </label>
+                <label className="checkbox-field">
+                  <input type="radio" name="auditType" value="technical" />
+                  Technical Audit — SEO/technical health, structured data, Core Web Vitals
+                </label>
 
                 <button type="submit" disabled={auditBusy}>
                   {auditBusy ? 'Running audit…' : 'Run Website Audit'}
