@@ -88,29 +88,36 @@ export const handler: Handler = async (event) => {
     if (mdInsertError) throw mdInsertError
     createdDocuments.push(mdDoc)
 
-    for (const shot of result.screenshots) {
-      const screenshotPath = `${clientId}/${Date.now()}-${sanitizeFilename(`website-audit-${result.hostname}-${shot.pageTitle}.png`)}`
-      const { error: shotUploadError } = await supabaseAdmin.storage
-        .from(BUCKET)
-        .upload(screenshotPath, shot.png, { contentType: 'image/png' })
-      if (shotUploadError) throw shotUploadError
+    // Uploaded in parallel rather than one at a time — with a tight overall
+    // request budget (see the timeout note in site-audit.ts), a sequential
+    // loop over even 2-3 screenshots was real, avoidable time on top of the
+    // page renders that already ate most of the budget.
+    const shotDocs = await Promise.all(
+      result.screenshots.map(async (shot) => {
+        const screenshotPath = `${clientId}/${Date.now()}-${sanitizeFilename(`website-audit-${result.hostname}-${shot.pageTitle}.png`)}`
+        const { error: shotUploadError } = await supabaseAdmin.storage
+          .from(BUCKET)
+          .upload(screenshotPath, shot.png, { contentType: 'image/png' })
+        if (shotUploadError) throw shotUploadError
 
-      const { data: shotDoc, error: shotInsertError } = await supabaseAdmin
-        .from('portal_documents')
-        .insert({
-          client_id: clientId,
-          title: `Website Audit — ${result.hostname} — ${shot.pageTitle} screenshot`,
-          description: `Screenshot captured from ${shot.pageUrl}.`,
-          category: 'Research',
-          file_path: screenshotPath,
-          sort_order: 0,
-          admin_only: false,
-        })
-        .select()
-        .single()
-      if (shotInsertError) throw shotInsertError
-      createdDocuments.push(shotDoc)
-    }
+        const { data: shotDoc, error: shotInsertError } = await supabaseAdmin
+          .from('portal_documents')
+          .insert({
+            client_id: clientId,
+            title: `Website Audit — ${result.hostname} — ${shot.pageTitle} screenshot`,
+            description: `Screenshot captured from ${shot.pageUrl}.`,
+            category: 'Research',
+            file_path: screenshotPath,
+            sort_order: 0,
+            admin_only: false,
+          })
+          .select()
+          .single()
+        if (shotInsertError) throw shotInsertError
+        return shotDoc
+      })
+    )
+    createdDocuments.push(...shotDocs)
 
     return json(200, { documents: createdDocuments, pagesCrawled: result.pagesCrawled })
   } catch (err) {
