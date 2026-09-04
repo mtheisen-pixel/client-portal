@@ -180,6 +180,16 @@ export function Admin() {
     }
   }
 
+  async function handleView(doc: AdminDocument) {
+    setError(null)
+    try {
+      const { url } = await adminApi.getDownloadUrl(password, doc.file_path)
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open document.')
+    }
+  }
+
   if (!unlocked) {
     return (
       <div className="page-center">
@@ -263,14 +273,23 @@ export function Admin() {
                       {doc.category && <span className="badge">{doc.category}</span>}
                       {doc.admin_only && <span className="badge badge-hidden">Hidden</span>}
                     </div>
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() => handleDelete(doc)}
-                      disabled={busy}
-                    >
-                      Delete
-                    </button>
+                    <div className="doc-row-actions">
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => handleView(doc)}
+                      >
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => handleDelete(doc)}
+                        disabled={busy}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </li>
                 ))}
                 {docs.length === 0 && <p className="muted">No documents yet.</p>}

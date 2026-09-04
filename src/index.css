@@ -257,6 +257,12 @@ button:disabled {
   color: var(--navy);
 }
 
+.doc-row-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .badge {
   display: inline-block;
   margin-top: 4px;

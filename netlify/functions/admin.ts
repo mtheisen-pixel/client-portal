@@ -129,6 +129,21 @@ export const handler: Handler = async (event) => {
         return json(200, { document: data })
       }
 
+      case 'get_download_url': {
+        const { filePath } = body as { filePath?: string }
+        if (!filePath) return json(400, { error: 'filePath is required.' })
+
+        // Short-lived (documents live in a private bucket, so there's no
+        // public URL to just click) — long enough to open in a new tab,
+        // short enough that the URL isn't worth persisting anywhere.
+        const { data, error } = await supabaseAdmin.storage
+          .from(BUCKET)
+          .createSignedUrl(filePath, 300)
+        if (error) throw error
+
+        return json(200, { url: data.signedUrl })
+      }
+
       case 'delete_document': {
         const { documentId, filePath } = body as { documentId?: string; filePath?: string }
         if (!documentId || !filePath) {
