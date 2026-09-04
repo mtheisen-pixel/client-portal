@@ -120,7 +120,7 @@ export const handler: Handler = async (event) => {
       const doc = await saveDocument(
         clientId,
         `${fullLabel} — ${parsedUrl.hostname} — Performance — ${today}`,
-        `PageSpeed Insights performance/accessibility check for ${parsedUrl.hostname}.`,
+        `PageSpeed Insights (mobile) performance check for ${parsedUrl.hostname}.`,
         `website-audit-technical-perf-${parsedUrl.hostname}.md`,
         markdown
       )
