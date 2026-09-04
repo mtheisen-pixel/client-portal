@@ -1,13 +1,27 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { authorizeAdminRequest } from './lib/auth'
-import { runWebsiteAudit } from './lib/site-audit'
+import { discoverPages, runWebsiteAudit } from './lib/site-audit'
+import { runTechnicalAuditFast } from './lib/technical-audit'
+import { runPageSpeedInsights, buildPageSpeedMarkdown } from './lib/pagespeed'
 
 // Dedicated function rather than a new action on admin.ts: a crawl can take
 // meaningfully longer than admin.ts's other operations (list/create/delete,
 // all near-instant Supabase calls), so an audit that runs long or fails
 // can't affect the reliability of those. Shares admin.ts's password/lockout
 // gate via lib/auth.ts.
+//
+// Three request shapes, distinguished by auditType/step:
+// - auditType 'creative' (default): the original crawl — page copy, colors/
+//   fonts, screenshots, perceived-tone analysis. One document + screenshots.
+// - auditType 'technical', step 'fast' (default for 'technical'): meta/
+//   structure/schema/hygiene/AI-visibility checks, all plain-HTTP. One
+//   document.
+// - auditType 'technical', step 'performance': Core Web Vitals via Google
+//   PageSpeed Insights. Deliberately its OWN request, not folded into the
+//   'fast' step above — PSI commonly takes 15-30+ seconds on its own,
+//   which risks the ~30s Netlify limit by itself. The Admin.tsx UI fires
+//   these as two sequential calls from one "Run Website Audit" click.
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL as string,
   process.env.SUPABASE_SERVICE_ROLE_KEY as string,
@@ -27,6 +41,30 @@ function json(statusCode: number, payload: unknown) {
   }
 }
 
+async function saveDocument(clientId: string, title: string, description: string, filename: string, content: string) {
+  const path = `${clientId}/${Date.now()}-${sanitizeFilename(filename)}`
+  const { error: uploadError } = await supabaseAdmin.storage
+    .from(BUCKET)
+    .upload(path, Buffer.from(content, 'utf-8'), { contentType: 'text/markdown' })
+  if (uploadError) throw uploadError
+
+  const { data, error: insertError } = await supabaseAdmin
+    .from('portal_documents')
+    .insert({
+      client_id: clientId,
+      title,
+      description,
+      category: 'Research',
+      file_path: path,
+      sort_order: 0,
+      admin_only: false,
+    })
+    .select()
+    .single()
+  if (insertError) throw insertError
+  return data
+}
+
 export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' }
@@ -42,7 +80,13 @@ export const handler: Handler = async (event) => {
   const authError = await authorizeAdminRequest(supabaseAdmin, event, body.password)
   if (authError) return json(authError.statusCode, { error: authError.error })
 
-  const { clientId, url, competitorName } = body as { clientId?: string; url?: string; competitorName?: string }
+  const { clientId, url, competitorName, auditType, step } = body as {
+    clientId?: string
+    url?: string
+    competitorName?: string
+    auditType?: 'creative' | 'technical'
+    step?: 'fast' | 'performance'
+  }
   if (!clientId || !url) {
     return json(400, { error: 'clientId and url are required.' })
   }
@@ -59,45 +103,63 @@ export const handler: Handler = async (event) => {
   // own site audit — same crawl, same document category and storage
   // pattern, just tagged and titled differently so Findings' citation
   // extraction can tell "your own site" apart from "a named competitor's
-  // site" (source_type "website_audit" vs "competitor_audit" — see
+  // site" (source_type "website_audit"/"website_audit_technical" vs
+  // "competitor_audit"/"competitor_audit_technical" — see
   // FINDINGS_EVIDENCE_SYSTEM_PROMPT in the audit repo).
   const trimmedCompetitorName = typeof competitorName === 'string' ? competitorName.trim() : ''
   const isCompetitor = trimmedCompetitorName.length > 0
   const auditKindLabel = isCompetitor ? `Competitor Audit — ${trimmedCompetitorName}` : 'Website Audit'
+  const isTechnical = auditType === 'technical'
+  const fullLabel = isTechnical ? `${auditKindLabel} (Technical)` : auditKindLabel
+  const today = new Date().toISOString().slice(0, 10)
 
   try {
+    if (isTechnical && step === 'performance') {
+      const result = await runPageSpeedInsights(parsedUrl.toString())
+      const markdown = buildPageSpeedMarkdown(fullLabel, result)
+      const doc = await saveDocument(
+        clientId,
+        `${fullLabel} — ${parsedUrl.hostname} — Performance — ${today}`,
+        `PageSpeed Insights performance/accessibility check for ${parsedUrl.hostname}.`,
+        `website-audit-technical-perf-${parsedUrl.hostname}.md`,
+        markdown
+      )
+      return json(200, { documents: [doc], pagesCrawled: 1 })
+    }
+
+    if (isTechnical) {
+      const discovered = await discoverPages(parsedUrl.toString())
+      const result = await runTechnicalAuditFast(parsedUrl.toString(), discovered)
+      const doc = await saveDocument(
+        clientId,
+        `${fullLabel} — ${result.hostname} — ${today}`,
+        isCompetitor
+          ? `Automated technical check of ${result.pagesCrawled} page(s) on ${result.hostname}, added as competitor "${trimmedCompetitorName}".`
+          : `Automated technical check of ${result.pagesCrawled} page(s) on ${result.hostname}.`,
+        `website-audit-technical-${result.hostname}.md`,
+        result.markdown
+      )
+      return json(200, { documents: [doc], pagesCrawled: result.pagesCrawled })
+    }
+
     if (!process.env.BROWSERLESS_API_KEY) {
       return json(500, {
-        error: 'BROWSERLESS_API_KEY is not set on this Netlify site — website audits need it configured before they can run.',
+        error: 'BROWSERLESS_API_KEY is not set on this Netlify site — Creative Audits need it configured before they can run.',
       })
     }
 
-    const result = await runWebsiteAudit(parsedUrl.toString(), `${auditKindLabel} — ${parsedUrl.hostname}`)
-    const today = new Date().toISOString().slice(0, 10)
+    const result = await runWebsiteAudit(parsedUrl.toString(), `${fullLabel} — ${parsedUrl.hostname}`)
     const createdDocuments = []
 
-    const markdownPath = `${clientId}/${Date.now()}-${sanitizeFilename(`website-audit-${result.hostname}.md`)}`
-    const { error: mdUploadError } = await supabaseAdmin.storage
-      .from(BUCKET)
-      .upload(markdownPath, Buffer.from(result.markdown, 'utf-8'), { contentType: 'text/markdown' })
-    if (mdUploadError) throw mdUploadError
-
-    const { data: mdDoc, error: mdInsertError } = await supabaseAdmin
-      .from('portal_documents')
-      .insert({
-        client_id: clientId,
-        title: `${auditKindLabel} — ${result.hostname} — ${today}`,
-        description: isCompetitor
-          ? `Automated crawl of ${result.pagesCrawled} page(s) on ${result.hostname}, added as competitor "${trimmedCompetitorName}".`
-          : `Automated crawl of ${result.pagesCrawled} page(s) on ${result.hostname}.`,
-        category: 'Research',
-        file_path: markdownPath,
-        sort_order: 0,
-        admin_only: false,
-      })
-      .select()
-      .single()
-    if (mdInsertError) throw mdInsertError
+    const mdDoc = await saveDocument(
+      clientId,
+      `${fullLabel} — ${result.hostname} — ${today}`,
+      isCompetitor
+        ? `Automated crawl of ${result.pagesCrawled} page(s) on ${result.hostname}, added as competitor "${trimmedCompetitorName}".`
+        : `Automated crawl of ${result.pagesCrawled} page(s) on ${result.hostname}.`,
+      `website-audit-${result.hostname}.md`,
+      result.markdown
+    )
     createdDocuments.push(mdDoc)
 
     // Uploaded in parallel rather than one at a time — with a tight overall
@@ -116,7 +178,7 @@ export const handler: Handler = async (event) => {
           .from('portal_documents')
           .insert({
             client_id: clientId,
-            title: `${auditKindLabel} — ${result.hostname} — ${shot.pageTitle} screenshot`,
+            title: `${fullLabel} — ${result.hostname} — ${shot.pageTitle} screenshot`,
             description: `Screenshot captured from ${shot.pageUrl}.`,
             category: 'Research',
             file_path: screenshotPath,

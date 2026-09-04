@@ -293,7 +293,8 @@ button:disabled {
   color: var(--body);
 }
 
-.checkbox-field input[type='checkbox'] {
+.checkbox-field input[type='checkbox'],
+.checkbox-field input[type='radio'] {
   width: 16px;
   height: 16px;
   accent-color: var(--teal);

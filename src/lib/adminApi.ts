@@ -75,12 +75,20 @@ export const adminApi = {
   // identical crawl against a named competitor's site instead of the
   // client's own — same document category/storage pattern, just tagged
   // "Competitor Audit — {name}" instead of "Website Audit" so Findings can
-  // tell the two apart.
-  runWebsiteAudit: async (password: string, clientId: string, url: string, competitorName?: string) => {
+  // tell the two apart. auditType/step select which crawl runs — see the
+  // doc comment at the top of website-audit.ts for the three shapes.
+  runWebsiteAudit: async (
+    password: string,
+    clientId: string,
+    url: string,
+    competitorName?: string,
+    auditType?: 'creative' | 'technical',
+    step?: 'fast' | 'performance',
+  ) => {
     const res = await fetch(WEBSITE_AUDIT_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password, clientId, url, competitorName }),
+      body: JSON.stringify({ password, clientId, url, competitorName, auditType, step }),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`)

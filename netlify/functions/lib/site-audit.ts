@@ -52,6 +52,8 @@
 // direction, which is why MAX_PAGES/MAX_SCREENSHOTS were trimmed further
 // alongside that change.
 
+import { analyzeTone, toneMarkdownSection } from "./tone-analysis";
+
 const MAX_PAGES = 3;
 const MAX_SCREENSHOTS = 1;
 // Live testing surfaced a 429 from Browserless's own gateway (not the
@@ -365,8 +367,15 @@ function pageHeading(page: RenderedPage): string {
   return page.title.trim() || page.url;
 }
 
-/** `auditLabel` is the full heading text the caller wants shown ("Website Audit — hostname" or "Competitor Audit — Name — hostname") — this module doesn't know or care which kind of audit it's building, that's website-audit.ts's call. */
-function buildMarkdown(auditLabel: string, pages: RenderedPage[]): string {
+/**
+ * `auditLabel` is the full heading text the caller wants shown ("Website
+ * Audit — hostname" or "Competitor Audit — Name — hostname") — this module
+ * doesn't know or care which kind of audit it's building, that's
+ * website-audit.ts's call. `toneSection` is pre-rendered markdown (or an
+ * explanatory string when tone analysis failed/was skipped) — built
+ * upstream in runWebsiteAudit so this function stays pure string assembly.
+ */
+function buildMarkdown(auditLabel: string, pages: RenderedPage[], toneSection: string): string {
   const sections = pages.map((page) => {
     const heading = pageHeading(page);
     const body = page.text || "(no extractable text content)";
@@ -383,7 +392,7 @@ function buildMarkdown(auditLabel: string, pages: RenderedPage[]): string {
     `Fonts observed: ${allFonts.length > 0 ? allFonts.join(", ") : "none detected"}.`,
   ].join("\n");
 
-  return [`# ${auditLabel}`, "", `${pages.length} page(s) crawled.`, "", visualSummary, "", ...sections].join("\n\n");
+  return [`# ${auditLabel}`, "", `${pages.length} page(s) crawled.`, "", visualSummary, "", toneSection, "", ...sections].join("\n\n");
 }
 
 /**
@@ -410,11 +419,30 @@ export async function runWebsiteAudit(siteUrl: string, auditLabel: string): Prom
     return { pageTitle: page ? pageHeading(page) : url, pageUrl: url, png: screenshotBuffers[i] };
   });
 
+  const toneSection = await buildToneSection(auditLabel, pages);
+
   const hostname = new URL(siteUrl).hostname;
   return {
     hostname,
-    markdown: buildMarkdown(auditLabel, pages),
+    markdown: buildMarkdown(auditLabel, pages, toneSection),
     screenshots,
     pagesCrawled: pages.length,
   };
+}
+
+/**
+ * Graceful — the rest of a Creative Audit doesn't depend on an Anthropic
+ * key, so a missing one degrades this one section rather than failing the
+ * whole audit (same reasoning as checkGeoReadability in technical-audit.ts).
+ */
+async function buildToneSection(auditLabel: string, pages: RenderedPage[]): Promise<string> {
+  const combinedText = pages.map((p) => p.text).filter(Boolean).join("\n\n");
+  if (!combinedText) return "## Perceived Tone\n\nSkipped — no extractable page text.";
+  try {
+    const descriptors = await analyzeTone(auditLabel, combinedText);
+    return toneMarkdownSection(descriptors);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown error";
+    return `## Perceived Tone\n\nSkipped — ${message}`;
+  }
 }
