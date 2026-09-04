@@ -1,21 +1,34 @@
-// Core Web Vitals / performance / accessibility via Google's PageSpeed
-// Insights API — deliberately its own module and its own Research document,
-// invoked as a separate HTTP request from the rest of Technical Audit's
-// checks (see technical-audit.ts). PSI runs a real Lighthouse audit
-// server-side and commonly takes 15-30+ seconds to respond, which alone
-// can approach or exceed Netlify's ~30s function limit on this plan — so
-// it never gets bundled into the same request as anything else. One PSI
-// call also covers performance, mobile-friendliness, and accessibility
-// (Lighthouse's accessibility category runs axe-core internally), so no
-// separate accessibility-scanning dependency is needed.
+// Core Web Vitals / performance via Google's PageSpeed Insights API —
+// deliberately its own module and its own Research document, invoked as a
+// separate HTTP request from the rest of Technical Audit's checks (see
+// technical-audit.ts). PSI runs a real Lighthouse audit server-side and
+// commonly takes 15-30+ seconds to respond, which alone can approach or
+// exceed Netlify's ~30s function limit on this plan — so it never gets
+// bundled into the same request as anything else, and it's given the full
+// available request budget (see TOTAL_BUDGET_MS below) rather than a
+// smaller slice.
 //
-// Only performance + accessibility are requested (not best-practices/seo,
-// which PSI can also return) — live testing showed the full 4-category
-// request running long enough to hit Netlify's limit on its own; fewer
-// categories means less Lighthouse audit work on Google's end. This
-// reduces the timeout risk, it doesn't eliminate it — PSI's own response
-// time is otherwise outside this app's control and can still occasionally
-// run long regardless.
+// Only "performance" is requested now — not accessibility, best-practices,
+// or seo, all of which PSI can also return in the same call. This request
+// used to also ask for "accessibility" (Lighthouse's accessibility category
+// runs axe-core internally, so that one call covered both for free), but
+// live testing kept timing out even after trimming from 4 categories to 2
+// and giving the request its full ~27s budget — accessibility was the next
+// lever available to cut real Lighthouse work, at the cost of losing that
+// free axe-core coverage (nothing else in Technical Audit covers
+// accessibility today; see technical-audit.ts's top-of-file comment, where
+// this gap is flagged as a known follow-up). This is a deliberate,
+// discussed trade-off (accuracy of the mobile-strategy Core Web Vitals data
+// mattered more here than keeping accessibility scoring), not a default —
+// see the git history on this file before reaching for another category
+// trim as the next lever.
+//
+// If timeouts persist even with a single category, the real fix is no
+// longer trimmable scope — it's decoupling this call from Netlify's
+// single-request time limit entirely (a longer-running function type, or a
+// poll-for-status pattern instead of one blocking request). That's real new
+// infrastructure, not a tweak, and deliberately not built until trimming to
+// "performance" alone has been confirmed insufficient in practice.
 //
 // Needs a Google PageSpeed Insights API key (free, Google Cloud Console —
 // enable the "PageSpeed Insights API") set as PAGESPEED_API_KEY.
@@ -31,7 +44,6 @@ interface PageSpeedApiResponse {
   lighthouseResult?: {
     categories?: {
       performance?: { score: number | null };
-      accessibility?: { score: number | null };
     };
     audits?: Record<string, LighthouseAudit>;
   };
@@ -40,7 +52,6 @@ interface PageSpeedApiResponse {
 export interface PageSpeedResult {
   url: string;
   performanceScore: number | null;
-  accessibilityScore: number | null;
   lcp: string | null;
   /**
    * Total Blocking Time (Lighthouse audit id "total-blocking-time") —
@@ -113,18 +124,14 @@ export async function runPageSpeedInsights(url: string): Promise<PageSpeedResult
   const endpoint = new URL("https://www.googleapis.com/pagespeedonline/v5/runPagespeed");
   endpoint.searchParams.set("url", url);
   endpoint.searchParams.set("key", apiKey);
+  // Mobile strategy is kept deliberately, even though it's slower than
+  // desktop (PSI simulates a throttled CPU/network for mobile) — mobile is
+  // the traffic that actually matters for this kind of client, and the
+  // accuracy of that number was explicitly chosen over the extra reliability
+  // margin desktop would buy. Only "performance" is requested — see this
+  // file's top-of-file comment for why accessibility was dropped.
   endpoint.searchParams.set("strategy", "mobile");
-  // Only the two categories the spec actually asked for (Core Web Vitals +
-  // accessibility) — live testing showed the full 4-category request
-  // (this plus best-practices/seo) can run long enough to hit Netlify's
-  // ~30s request limit. Fewer categories means less Lighthouse audit work
-  // on Google's end, which is the only lever available here (PSI's own
-  // response time isn't otherwise configurable). best-practices/seo scores
-  // were a bonus, not something asked for — losing them is the right
-  // trade against reliability.
-  for (const category of ["performance", "accessibility"]) {
-    endpoint.searchParams.append("category", category);
-  }
+  endpoint.searchParams.set("category", "performance");
 
   // The first attempt gets the full available budget — PSI genuinely
   // running long is far more common than a fast Lighthouse-run failure, so
@@ -175,7 +182,6 @@ export async function runPageSpeedInsights(url: string): Promise<PageSpeedResult
   return {
     url,
     performanceScore: toPercent(categories.performance?.score),
-    accessibilityScore: toPercent(categories.accessibility?.score),
     lcp: audits["largest-contentful-paint"]?.displayValue ?? null,
     // "total-blocking-time" is Google's own recommended lab proxy for INP.
     // The previous code read audits["interactive"] (Time to Interactive) —
@@ -199,7 +205,7 @@ export function buildPageSpeedMarkdown(auditLabel: string, result: PageSpeedResu
     "## Scores (mobile, 0-100)",
     "",
     `- Performance: ${result.performanceScore ?? "n/a"}`,
-    `- Accessibility: ${result.accessibilityScore ?? "n/a"}`,
+    "- Accessibility: not checked by this step — see the Technical Audit's other sections; a dedicated accessibility pass (e.g. axe-core) is a known follow-up, not yet built.",
     "",
     "## Core Web Vitals",
     "",
