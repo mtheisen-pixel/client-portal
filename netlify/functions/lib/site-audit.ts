@@ -33,21 +33,38 @@
 // Netlify's synchronous function limit is ~30s on this plan (confirmed
 // empirically elsewhere in this codebase — see the audit app's opportunity-
 // count cap, added after the same class of failure). A real site's audit
-// (up to 6 renders + 3 screenshots, each a full Browserless page load, plus
+// (several renders + screenshots, each a full Browserless page load, plus
 // per-file storage uploads) can comfortably exceed that, which is exactly
-// what happened on kidsquest.com — 20-30s, then the connection was dropped
-// (a browser-side "Failed to fetch", not a clean error response, because
-// Netlify kills the function outright rather than returning one). MAX_PAGES/
-// MAX_SCREENSHOTS and the per-call timeouts below are kept tight for that
-// reason; this is a mitigation, not a guarantee — a large or slow-loading
-// site can still exceed the budget. The durable fix is converting this to
-// the same one-step-per-request, polling-driven pattern the audit app's
-// report generation already uses; this file stays a single-request design
-// until/unless that's worth building.
+// what happened on kidsquest.com early on — 20-30s, then the connection
+// was dropped (a browser-side "Failed to fetch", not a clean error
+// response, because Netlify kills the function outright rather than
+// returning one). MAX_PAGES/MAX_SCREENSHOTS and the per-call timeouts below
+// are kept tight for that reason; this is a mitigation, not a guarantee — a
+// large or slow-loading site can still exceed the budget. The durable fix
+// is converting this to the same one-step-per-request, polling-driven
+// pattern the audit app's report generation already uses; this file stays
+// a single-request design until/unless that's worth building.
+//
+// Separately: CONCURRENCY defaults to 1, not because of Netlify's timeout,
+// but because of Browserless's own account-level concurrency cap — see the
+// note on CONCURRENCY below. Running fewer pages sequentially rather than a
+// few in parallel eats into the same ~30s budget from a different
+// direction, which is why MAX_PAGES/MAX_SCREENSHOTS were trimmed further
+// alongside that change.
 
-const MAX_PAGES = 4;
-const MAX_SCREENSHOTS = 2;
-const CONCURRENCY = 3;
+const MAX_PAGES = 3;
+const MAX_SCREENSHOTS = 1;
+// Live testing surfaced a 429 from Browserless's own gateway (not the
+// target site — confirmed by the identical, instant "429 ... openresty"
+// response happening across several unrelated domains, including
+// brandaify.com itself, which has no reason to be rate-limiting or
+// blocking us). That's Browserless's own request/concurrency cap for this
+// account's plan being hit before any real page-load even starts — most
+// Browserless plans (especially trial/free tiers) cap concurrent sessions
+// at a small number, often 1. Defaults to 1 for that reason; override
+// BROWSERLESS_CONCURRENCY once the account's plan is confirmed to allow
+// more, to speed the crawl back up.
+const CONCURRENCY = Number(process.env.BROWSERLESS_CONCURRENCY) || 1;
 const PAGE_RENDER_TIMEOUT_MS = 12000;
 const PRIORITY_PATH_HINTS = ["about", "contact", "product", "products", "service", "services", "shop", "blog", "pricing"];
 
