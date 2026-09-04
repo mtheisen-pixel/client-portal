@@ -150,6 +150,11 @@ export function Admin() {
         setAuditStatus('Running technical checks…')
         const fastResult = await adminApi.runWebsiteAudit(password, selectedClientId, url, competitorName || undefined, 'technical', 'fast')
         setAuditStatus(`Technical checks done (${fastResult.pagesCrawled} page(s)) — running performance check…`)
+        // Refresh here too, not just at the end — the fast-checks document is
+        // already saved server-side at this point, and the performance step
+        // can take long enough that leaving the list stale makes it look like
+        // nothing happened yet.
+        await refreshDocs(selectedClientId)
         await adminApi.runWebsiteAudit(password, selectedClientId, url, competitorName || undefined, 'technical', 'performance')
         setAuditStatus(`Done — saved a Technical ${label}, including a performance check.`)
       }

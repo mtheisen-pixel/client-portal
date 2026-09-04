@@ -67,6 +67,31 @@ const NOTABLE_AUDIT_IDS = [
   "document-title",
 ];
 
+/** True for PSI's generic "Lighthouse returned error: Something went wrong" failure — Google's own headless Chrome failing to audit the page, distinct from an HTTP/auth/quota error. Often transient, so worth one retry rather than failing the whole step on the first hit. */
+function isLighthouseRunError(status: number, bodyText: string): boolean {
+  if (status !== 500) return false;
+  try {
+    const parsed = JSON.parse(bodyText) as { error?: { errors?: { domain?: string }[] } };
+    return parsed.error?.errors?.some((e) => e.domain === "lighthouse") ?? false;
+  } catch {
+    return false;
+  }
+}
+
+class LighthouseRunError extends Error {}
+
+async function requestPageSpeed(endpoint: URL, timeoutMs: number): Promise<PageSpeedApiResponse> {
+  const res = await fetch(endpoint.toString(), { signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) {
+    const bodyText = await res.text();
+    if (isLighthouseRunError(res.status, bodyText)) {
+      throw new LighthouseRunError(`${res.status} ${bodyText}`);
+    }
+    throw new Error(`PageSpeed Insights failed for ${endpoint.searchParams.get("url")}: ${res.status} ${bodyText}`);
+  }
+  return (await res.json()) as PageSpeedApiResponse;
+}
+
 export async function runPageSpeedInsights(url: string): Promise<PageSpeedResult> {
   const apiKey = process.env.PAGESPEED_API_KEY;
   if (!apiKey) {
@@ -89,11 +114,27 @@ export async function runPageSpeedInsights(url: string): Promise<PageSpeedResult
     endpoint.searchParams.append("category", category);
   }
 
-  const res = await fetch(endpoint.toString(), { signal: AbortSignal.timeout(28000) });
-  if (!res.ok) {
-    throw new Error(`PageSpeed Insights failed for ${url}: ${res.status} ${await res.text()}`);
+  let data: PageSpeedApiResponse;
+  try {
+    data = await requestPageSpeed(endpoint, 20000);
+  } catch (err) {
+    if (!(err instanceof LighthouseRunError)) throw err;
+    // One immediate retry — this failure mode is Google's own Lighthouse run
+    // failing (not an HTTP/auth/quota problem), and is commonly transient.
+    // Shorter timeout than the first attempt since only ~28s total is
+    // available before Netlify's own request limit.
+    try {
+      data = await requestPageSpeed(endpoint, 8000);
+    } catch (retryErr) {
+      if (retryErr instanceof LighthouseRunError) {
+        throw new Error(
+          `PageSpeed Insights couldn't audit ${url}: Google's Lighthouse run failed twice in a row ("Something went wrong"). This is on Google's end, not this app — it usually means the page didn't load cleanly for their headless Chrome (bot/WAF protection, a redirect, or an interstitial). Try again in a bit, or check that ${url} loads normally in an incognito window.`
+        );
+      }
+      throw retryErr;
+    }
   }
-  const data = (await res.json()) as PageSpeedApiResponse;
+
   const categories = data.lighthouseResult?.categories ?? {};
   const audits = data.lighthouseResult?.audits ?? {};
 
