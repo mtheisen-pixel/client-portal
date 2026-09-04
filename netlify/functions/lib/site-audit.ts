@@ -29,10 +29,26 @@
 // requests to the target site, which is both kind to the target and what
 // keeps this whole run inside one Netlify function's request budget instead
 // of needing the step-loop pattern the audit app's report generation uses.
+//
+// Netlify's synchronous function limit is ~30s on this plan (confirmed
+// empirically elsewhere in this codebase — see the audit app's opportunity-
+// count cap, added after the same class of failure). A real site's audit
+// (up to 6 renders + 3 screenshots, each a full Browserless page load, plus
+// per-file storage uploads) can comfortably exceed that, which is exactly
+// what happened on kidsquest.com — 20-30s, then the connection was dropped
+// (a browser-side "Failed to fetch", not a clean error response, because
+// Netlify kills the function outright rather than returning one). MAX_PAGES/
+// MAX_SCREENSHOTS and the per-call timeouts below are kept tight for that
+// reason; this is a mitigation, not a guarantee — a large or slow-loading
+// site can still exceed the budget. The durable fix is converting this to
+// the same one-step-per-request, polling-driven pattern the audit app's
+// report generation already uses; this file stays a single-request design
+// until/unless that's worth building.
 
-const MAX_PAGES = 6;
-const MAX_SCREENSHOTS = 3;
+const MAX_PAGES = 4;
+const MAX_SCREENSHOTS = 2;
 const CONCURRENCY = 3;
+const PAGE_RENDER_TIMEOUT_MS = 12000;
 const PRIORITY_PATH_HINTS = ["about", "contact", "product", "products", "service", "services", "shop", "blog", "pricing"];
 
 function browserlessBaseUrl(): string {
@@ -233,10 +249,18 @@ export interface RenderedPage {
  * as a plain in-page `evaluate` — no page navigation logic here, that's
  * handled by the wrapping function below — so it stays easy to paste into
  * Browserless's own debugger to verify independently of this codebase.
+ *
+ * waitUntil: 'domcontentloaded' rather than 'networkidle2' deliberately —
+ * a page with any persistent background activity (chat widgets, analytics,
+ * ad trackers) never truly goes network-idle, so networkidle2 tends to sit
+ * out its full timeout on real-world sites. domcontentloaded is what the
+ * text/color/font extraction below actually needs (the initial HTML +
+ * inline styles) and is far more predictable time-wise, which matters a lot
+ * more than it used to now that this whole request has a tight budget.
  */
 const EXTRACTION_SCRIPT = `
 module.exports = async ({ page, context }) => {
-  await page.goto(context.url, { waitUntil: 'networkidle2', timeout: 20000 });
+  await page.goto(context.url, { waitUntil: 'domcontentloaded', timeout: 8000 });
 
   const data = await page.evaluate(() => {
     const title = document.title || '';
@@ -269,7 +293,7 @@ export async function renderPage(url: string): Promise<RenderedPage> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code: EXTRACTION_SCRIPT, context: { url } }),
-    signal: AbortSignal.timeout(25000),
+    signal: AbortSignal.timeout(PAGE_RENDER_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`Browserless render failed for ${url}: ${res.status} ${await res.text()}`);
@@ -290,7 +314,7 @@ export async function screenshotPage(url: string): Promise<Buffer> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url, options: { type: "png", fullPage: false } }),
-    signal: AbortSignal.timeout(25000),
+    signal: AbortSignal.timeout(PAGE_RENDER_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`Browserless screenshot failed for ${url}: ${res.status} ${await res.text()}`);
