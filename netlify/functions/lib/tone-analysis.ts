@@ -13,12 +13,32 @@ let cachedClient: Anthropic | null = null;
 
 function anthropicClient(): Anthropic {
   if (cachedClient) return cachedClient;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  // Trimmed defensively — a key pasted into Netlify's env var UI with a
+  // trailing newline/space (easy to pick up from a copy-paste) is a common,
+  // otherwise-invisible cause of a 401 "invalid x-api-key" that looks like a
+  // wrong key when it's actually just whitespace corruption.
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY is not set — tone analysis needs an Anthropic API key configured on this Netlify site.");
   }
   cachedClient = new Anthropic({ apiKey });
   return cachedClient;
+}
+
+/**
+ * Turns an Anthropic call failure into a short, human-readable note safe to
+ * embed directly in a report — never the raw SDK error (which for an auth
+ * failure is literally `401 {"type":"error","error":{...}}`, unreadable to a
+ * client and not actionable without knowing this is an env var problem).
+ * `checkLabel` names the specific check for the reader (e.g.
+ * "AI-summarizability check", "Perceived Tone analysis").
+ */
+export function describeAnthropicFailure(err: unknown, checkLabel: string): string {
+  if (err instanceof Anthropic.AuthenticationError) {
+    return `${checkLabel} unavailable — the Anthropic API key configured on this Netlify site was rejected. Check that ANTHROPIC_API_KEY is set correctly (and in the right deploy context).`;
+  }
+  const message = err instanceof Error ? err.message : "unknown error";
+  return `${checkLabel} unavailable — ${message}`;
 }
 
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
