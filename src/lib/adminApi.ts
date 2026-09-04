@@ -68,12 +68,16 @@ export const adminApi = {
 
   // Separate endpoint, not the action-dispatched `call` above — a crawl can
   // run much longer than admin.ts's other near-instant operations, see
-  // netlify/functions/website-audit.ts.
-  runWebsiteAudit: async (password: string, clientId: string, url: string) => {
+  // netlify/functions/website-audit.ts. A non-empty competitorName runs the
+  // identical crawl against a named competitor's site instead of the
+  // client's own — same document category/storage pattern, just tagged
+  // "Competitor Audit — {name}" instead of "Website Audit" so Findings can
+  // tell the two apart.
+  runWebsiteAudit: async (password: string, clientId: string, url: string, competitorName?: string) => {
     const res = await fetch(WEBSITE_AUDIT_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password, clientId, url }),
+      body: JSON.stringify({ password, clientId, url, competitorName }),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`)
