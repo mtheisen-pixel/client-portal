@@ -267,6 +267,13 @@ export interface RenderedPage {
  * handled by the wrapping function below — so it stays easy to paste into
  * Browserless's own debugger to verify independently of this codebase.
  *
+ * `export default`, not `module.exports` — confirmed against Browserless's
+ * actual source (src/shared/utils/function/client.ts: the runner does
+ * `import('./' + functionCodeJS)` and destructures the module's `default`
+ * export, so `module`/`exports` aren't defined in that scope at all).
+ * Verified live: `module.exports` produced a "module is not defined" 400
+ * from Browserless.
+ *
  * waitUntil: 'domcontentloaded' rather than 'networkidle2' deliberately —
  * a page with any persistent background activity (chat widgets, analytics,
  * ad trackers) never truly goes network-idle, so networkidle2 tends to sit
@@ -276,7 +283,7 @@ export interface RenderedPage {
  * more than it used to now that this whole request has a tight budget.
  */
 const EXTRACTION_SCRIPT = `
-module.exports = async ({ page, context }) => {
+export default async ({ page, context }) => {
   await page.goto(context.url, { waitUntil: 'domcontentloaded', timeout: 8000 });
 
   const data = await page.evaluate(() => {
@@ -301,7 +308,13 @@ module.exports = async ({ page, context }) => {
     return { title, metaDescription, text, colors: Array.from(colors), fonts: Array.from(fonts) };
   });
 
-  return { data, type: 'application/json' };
+  // Return the object directly — Browserless inspects the return value's
+  // type itself and serializes an object as the JSON response body
+  // (src/shared/utils/function/client.ts). No wrapper envelope needed or
+  // expected; the earlier { data, type: 'application/json' } shape here was
+  // an unverified guess that Browserless's response inspection doesn't
+  // actually use.
+  return data;
 };
 `;
 
