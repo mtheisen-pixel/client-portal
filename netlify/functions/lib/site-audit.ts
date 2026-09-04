@@ -14,6 +14,14 @@
 // Browserless's current docs the first time this runs for real, and adjust
 // BROWSERLESS_BASE_URL / the request bodies below if they've drifted.
 //
+// Host: Browserless Cloud has no per-account assigned region — any regional
+// endpoint works with any account's token (confirmed directly with
+// Browserless support). Defaults to production-sfo.browserless.io (their
+// "default / US West"); override BROWSERLESS_BASE_URL to
+// production-lon.browserless.io or production-ams.browserless.io for lower
+// latency from those regions if it matters. The old chrome.browserless.io
+// host is Browserless's legacy domain, not this one.
+//
 // Rate limiting: deliberately conservative rather than configurable — each
 // audit crawls at most MAX_PAGES pages (sitemap or homepage-link discovery,
 // same-origin only, robots.txt-filtered) with at most CONCURRENCY requests
@@ -28,7 +36,7 @@ const CONCURRENCY = 3;
 const PRIORITY_PATH_HINTS = ["about", "contact", "product", "products", "service", "services", "shop", "blog", "pricing"];
 
 function browserlessBaseUrl(): string {
-  return (process.env.BROWSERLESS_BASE_URL || "https://chrome.browserless.io").replace(/\/$/, "");
+  return (process.env.BROWSERLESS_BASE_URL || "https://production-sfo.browserless.io").replace(/\/$/, "");
 }
 
 function browserlessToken(): string {
