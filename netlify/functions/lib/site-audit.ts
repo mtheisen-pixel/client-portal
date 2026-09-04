@@ -52,7 +52,7 @@
 // direction, which is why MAX_PAGES/MAX_SCREENSHOTS were trimmed further
 // alongside that change.
 
-import { analyzeTone, toneMarkdownSection } from "./tone-analysis";
+import { analyzeTone, toneMarkdownSection, describeAnthropicFailure } from "./tone-analysis";
 
 const MAX_PAGES = 3;
 const MAX_SCREENSHOTS = 1;
@@ -442,7 +442,6 @@ async function buildToneSection(auditLabel: string, pages: RenderedPage[]): Prom
     const descriptors = await analyzeTone(auditLabel, combinedText);
     return toneMarkdownSection(descriptors);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "unknown error";
-    return `## Perceived Tone\n\nSkipped — ${message}`;
+    return `## Perceived Tone\n\n${describeAnthropicFailure(err, "Perceived Tone analysis")}`;
   }
 }

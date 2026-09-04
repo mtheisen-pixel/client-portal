@@ -11,7 +11,7 @@
 // This is diagnostic only — it reports what it finds, it never tries to
 // fix anything (no schema injection, no meta-tag generation).
 
-import { analyzeGeoReadability } from "./tone-analysis";
+import { analyzeGeoReadability, describeAnthropicFailure } from "./tone-analysis";
 
 const TECH_MAX_PAGES = 4;
 const LINK_CHECK_SAMPLE = 8;
@@ -53,8 +53,7 @@ async function checkGeoReadability(homepageHtml: string): Promise<string> {
   try {
     return await analyzeGeoReadability(extractBodyText(homepageHtml));
   } catch (err) {
-    const message = err instanceof Error ? err.message : "unknown error";
-    return `Skipped — ${message}`;
+    return describeAnthropicFailure(err, "AI-summarizability check");
   }
 }
 

@@ -114,17 +114,33 @@ export async function runPageSpeedInsights(url: string): Promise<PageSpeedResult
     endpoint.searchParams.append("category", category);
   }
 
+  // The first attempt gets the full available budget — PSI genuinely
+  // running long is far more common than a fast Lighthouse-run failure, so
+  // shrinking this to make room for a retry (tried previously) just made
+  // real timeouts more likely without meaningfully helping the retry case.
+  // A Lighthouse-run-error response (see isLighthouseRunError) fails fast —
+  // normally within a couple of seconds, nowhere near this budget — so
+  // there's almost always time left over for one retry; that leftover time
+  // is computed below rather than assumed.
+  const TOTAL_BUDGET_MS = 27000;
+  const startedAt = Date.now();
+
   let data: PageSpeedApiResponse;
   try {
-    data = await requestPageSpeed(endpoint, 20000);
+    data = await requestPageSpeed(endpoint, TOTAL_BUDGET_MS);
   } catch (err) {
     if (!(err instanceof LighthouseRunError)) throw err;
-    // One immediate retry — this failure mode is Google's own Lighthouse run
-    // failing (not an HTTP/auth/quota problem), and is commonly transient.
-    // Shorter timeout than the first attempt since only ~28s total is
-    // available before Netlify's own request limit.
+    const remainingMs = TOTAL_BUDGET_MS - (Date.now() - startedAt);
+    if (remainingMs < 3000) {
+      throw new Error(
+        `PageSpeed Insights couldn't audit ${url}: Google's Lighthouse run failed ("Something went wrong"), and there wasn't enough time left in this request to retry safely. This is on Google's end, not this app — it usually means the page didn't load cleanly for their headless Chrome (bot/WAF protection, a redirect, or an interstitial). Try again in a bit, or check that ${url} loads normally in an incognito window.`
+      );
+    }
+    // One immediate retry with whatever budget is left — this failure mode
+    // is Google's own Lighthouse run failing (not an HTTP/auth/quota
+    // problem), and is commonly transient.
     try {
-      data = await requestPageSpeed(endpoint, 8000);
+      data = await requestPageSpeed(endpoint, remainingMs);
     } catch (retryErr) {
       if (retryErr instanceof LighthouseRunError) {
         throw new Error(
