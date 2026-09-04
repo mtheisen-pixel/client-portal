@@ -1,4 +1,5 @@
 const ENDPOINT = '/.netlify/functions/admin'
+const WEBSITE_AUDIT_ENDPOINT = '/.netlify/functions/website-audit'
 
 async function call<T>(password: string, action: string, payload: Record<string, unknown> = {}) {
   // password/action are spread last so a payload field can never shadow them
@@ -64,4 +65,18 @@ export const adminApi = {
 
   deleteDocument: (password: string, documentId: string, filePath: string) =>
     call<{ ok: true }>(password, 'delete_document', { documentId, filePath }),
+
+  // Separate endpoint, not the action-dispatched `call` above — a crawl can
+  // run much longer than admin.ts's other near-instant operations, see
+  // netlify/functions/website-audit.ts.
+  runWebsiteAudit: async (password: string, clientId: string, url: string) => {
+    const res = await fetch(WEBSITE_AUDIT_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password, clientId, url }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`)
+    return data as { documents: AdminDocument[]; pagesCrawled: number }
+  },
 }
