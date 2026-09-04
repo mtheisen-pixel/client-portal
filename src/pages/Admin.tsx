@@ -133,9 +133,19 @@ export function Admin() {
       const fd = new FormData(form)
       const url = String(fd.get('websiteUrl') ?? '').trim()
       if (!url) throw new Error('Enter a URL to audit.')
+      const competitorName = String(fd.get('competitorName') ?? '').trim()
 
-      const { pagesCrawled } = await adminApi.runWebsiteAudit(password, selectedClientId, url)
-      setAuditStatus(`Done — crawled ${pagesCrawled} page(s) and saved the results as Research documents.`)
+      const { pagesCrawled } = await adminApi.runWebsiteAudit(
+        password,
+        selectedClientId,
+        url,
+        competitorName || undefined
+      )
+      setAuditStatus(
+        competitorName
+          ? `Done — crawled ${pagesCrawled} page(s) and saved as a Competitor Audit for "${competitorName}".`
+          : `Done — crawled ${pagesCrawled} page(s) and saved the results as Research documents.`
+      )
       form.reset()
       await refreshDocs(selectedClientId)
     } catch (err) {
@@ -310,7 +320,9 @@ export function Admin() {
               <p className="muted" style={{ marginTop: 4 }}>
                 Crawls a small set of pages on the site, pulls page copy and a rough color/font
                 summary, and saves the result as Research documents (a text summary plus a few
-                page screenshots) — same as uploading them by hand, just automated.
+                page screenshots) — same as uploading them by hand, just automated. Leave
+                &quot;Competitor name&quot; blank to audit the client&apos;s own site, or fill it in
+                to audit a named competitor&apos;s site instead — run it once per competitor.
               </p>
               <form onSubmit={handleRunWebsiteAudit} className="stacked-form">
                 <label htmlFor="websiteUrl">Website URL</label>
@@ -320,6 +332,13 @@ export function Admin() {
                   type="url"
                   placeholder="https://example.com"
                   required
+                />
+
+                <label htmlFor="competitorName">Competitor name (optional)</label>
+                <input
+                  id="competitorName"
+                  name="competitorName"
+                  placeholder="Leave blank for the client's own site — or name a competitor, e.g. Parachute"
                 />
 
                 <button type="submit" disabled={auditBusy}>

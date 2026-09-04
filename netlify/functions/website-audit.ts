@@ -42,7 +42,7 @@ export const handler: Handler = async (event) => {
   const authError = await authorizeAdminRequest(supabaseAdmin, event, body.password)
   if (authError) return json(authError.statusCode, { error: authError.error })
 
-  const { clientId, url } = body as { clientId?: string; url?: string }
+  const { clientId, url, competitorName } = body as { clientId?: string; url?: string; competitorName?: string }
   if (!clientId || !url) {
     return json(400, { error: 'clientId and url are required.' })
   }
@@ -55,6 +55,16 @@ export const handler: Handler = async (event) => {
     return json(400, { error: 'That doesn’t look like a valid http(s) URL.' })
   }
 
+  // A non-empty competitorName is what distinguishes this from a client's
+  // own site audit — same crawl, same document category and storage
+  // pattern, just tagged and titled differently so Findings' citation
+  // extraction can tell "your own site" apart from "a named competitor's
+  // site" (source_type "website_audit" vs "competitor_audit" — see
+  // FINDINGS_EVIDENCE_SYSTEM_PROMPT in the audit repo).
+  const trimmedCompetitorName = typeof competitorName === 'string' ? competitorName.trim() : ''
+  const isCompetitor = trimmedCompetitorName.length > 0
+  const auditKindLabel = isCompetitor ? `Competitor Audit — ${trimmedCompetitorName}` : 'Website Audit'
+
   try {
     if (!process.env.BROWSERLESS_API_KEY) {
       return json(500, {
@@ -62,7 +72,7 @@ export const handler: Handler = async (event) => {
       })
     }
 
-    const result = await runWebsiteAudit(parsedUrl.toString(), parsedUrl.hostname)
+    const result = await runWebsiteAudit(parsedUrl.toString(), `${auditKindLabel} — ${parsedUrl.hostname}`)
     const today = new Date().toISOString().slice(0, 10)
     const createdDocuments = []
 
@@ -76,8 +86,10 @@ export const handler: Handler = async (event) => {
       .from('portal_documents')
       .insert({
         client_id: clientId,
-        title: `Website Audit — ${result.hostname} — ${today}`,
-        description: `Automated crawl of ${result.pagesCrawled} page(s) on ${result.hostname}.`,
+        title: `${auditKindLabel} — ${result.hostname} — ${today}`,
+        description: isCompetitor
+          ? `Automated crawl of ${result.pagesCrawled} page(s) on ${result.hostname}, added as competitor "${trimmedCompetitorName}".`
+          : `Automated crawl of ${result.pagesCrawled} page(s) on ${result.hostname}.`,
         category: 'Research',
         file_path: markdownPath,
         sort_order: 0,
@@ -104,7 +116,7 @@ export const handler: Handler = async (event) => {
           .from('portal_documents')
           .insert({
             client_id: clientId,
-            title: `Website Audit — ${result.hostname} — ${shot.pageTitle} screenshot`,
+            title: `${auditKindLabel} — ${result.hostname} — ${shot.pageTitle} screenshot`,
             description: `Screenshot captured from ${shot.pageUrl}.`,
             category: 'Research',
             file_path: screenshotPath,

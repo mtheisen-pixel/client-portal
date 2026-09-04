@@ -335,7 +335,8 @@ function pageHeading(page: RenderedPage): string {
   return page.title.trim() || page.url;
 }
 
-function buildMarkdown(siteLabel: string, pages: RenderedPage[]): string {
+/** `auditLabel` is the full heading text the caller wants shown ("Website Audit — hostname" or "Competitor Audit — Name — hostname") — this module doesn't know or care which kind of audit it's building, that's website-audit.ts's call. */
+function buildMarkdown(auditLabel: string, pages: RenderedPage[]): string {
   const sections = pages.map((page) => {
     const heading = pageHeading(page);
     const body = page.text || "(no extractable text content)";
@@ -352,7 +353,7 @@ function buildMarkdown(siteLabel: string, pages: RenderedPage[]): string {
     `Fonts observed: ${allFonts.length > 0 ? allFonts.join(", ") : "none detected"}.`,
   ].join("\n");
 
-  return [`# Website Audit — ${siteLabel}`, "", `${pages.length} page(s) crawled.`, "", visualSummary, "", ...sections].join("\n\n");
+  return [`# ${auditLabel}`, "", `${pages.length} page(s) crawled.`, "", visualSummary, "", ...sections].join("\n\n");
 }
 
 /**
@@ -361,9 +362,10 @@ function buildMarkdown(siteLabel: string, pages: RenderedPage[]): string {
  * pages, and assembles the markdown Research document text plus the raw
  * screenshot bytes. Does not touch Supabase — the caller (website-audit.ts)
  * owns saving these as portal_documents rows, so this module stays testable
- * independent of storage.
+ * independent of storage. `auditLabel` becomes the markdown's H1 heading
+ * verbatim — see buildMarkdown's doc comment.
  */
-export async function runWebsiteAudit(siteUrl: string, siteLabel: string): Promise<WebsiteAuditResult> {
+export async function runWebsiteAudit(siteUrl: string, auditLabel: string): Promise<WebsiteAuditResult> {
   const pageUrls = await discoverPages(siteUrl);
   if (pageUrls.length === 0) {
     throw new Error(`No crawlable pages found for ${siteUrl} (check the URL and robots.txt).`);
@@ -381,7 +383,7 @@ export async function runWebsiteAudit(siteUrl: string, siteLabel: string): Promi
   const hostname = new URL(siteUrl).hostname;
   return {
     hostname,
-    markdown: buildMarkdown(siteLabel, pages),
+    markdown: buildMarkdown(auditLabel, pages),
     screenshots,
     pagesCrawled: pages.length,
   };
