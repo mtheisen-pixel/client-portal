@@ -659,8 +659,26 @@ export interface TechnicalAuditResult {
  * checks. The Core Web Vitals / PageSpeed Insights piece is a separate
  * function (pagespeed.ts) invoked as its own request — see that file's doc
  * comment for why.
+ *
+ * `auditLabel` is the full heading text the caller wants shown ("Website
+ * Audit (Technical) — hostname" or "Competitor Audit — Name (Technical) —
+ * hostname") and becomes the markdown's H1 verbatim — mirrors the pattern
+ * runWebsiteAudit/buildMarkdown already use in site-audit.ts. Before this
+ * parameter existed, the heading was hardcoded to a generic "Website Audit
+ * (Technical)" regardless of which site was actually audited — harmless for
+ * a client's own site, but for a Competitor Audit it meant the document's
+ * own body never named which competitor it was about, only the hostname.
+ * When several competitor Technical Audit documents were selected together
+ * for the same report, that generic self-labeling (contradicting the
+ * correctly-specific portal_documents.title alongside it) was reproducible
+ * as citation confusion downstream in the audit-report app — see that
+ * repo's generate-report.ts / FINDINGS_EVIDENCE_SYSTEM_PROMPT.
  */
-export async function runTechnicalAuditFast(siteUrl: string, discoveredPages: string[]): Promise<TechnicalAuditResult> {
+export async function runTechnicalAuditFast(
+  siteUrl: string,
+  discoveredPages: string[],
+  auditLabel: string
+): Promise<TechnicalAuditResult> {
   const origin = new URL(siteUrl).origin;
   const pageUrls = discoveredPages.slice(0, TECH_MAX_PAGES);
 
@@ -718,7 +736,7 @@ export async function runTechnicalAuditFast(siteUrl: string, discoveredPages: st
   const localSeoNotes = buildLocalSeoNotes(pages, discoveredPages, httpsRes?.text ?? "");
 
   const sections = [
-    `# Website Audit (Technical) — ${origin.replace(/^https?:\/\//, "")}`,
+    `# ${auditLabel}`,
     "",
     `${pages.length} page(s) checked.`,
     "",

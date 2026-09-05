@@ -117,7 +117,7 @@ export const handler: Handler = async (event) => {
   try {
     if (isTechnical) {
       const discovered = await discoverPages(parsedUrl.toString())
-      const result = await runTechnicalAuditFast(parsedUrl.toString(), discovered)
+      const result = await runTechnicalAuditFast(parsedUrl.toString(), discovered, `${fullLabel} — ${parsedUrl.hostname}`)
       const doc = await saveDocument(
         clientId,
         `${fullLabel} — ${result.hostname} — ${today}`,
