@@ -13,14 +13,15 @@
 // comment for how a background function's caller finds out the result
 // (there's no synchronous response to return it in).
 //
-// Only "performance" is requested — not accessibility, best-practices, or
-// seo, all of which PSI can also return in the same call. Losing
-// accessibility here was a deliberate trade made *before* the move to a
-// background function (nothing else in Technical Audit covers
-// accessibility today; see technical-audit.ts's top-of-file comment, where
-// this gap is flagged as a known follow-up) — now that this call isn't
-// racing a ~30s ceiling, re-adding "accessibility" back to the category
-// list is a live option again if it's worth the free axe-core coverage.
+// Requests "performance" and "accessibility" — not best-practices or seo,
+// which PSI can also return in the same call but were never asked for.
+// Accessibility was dropped for one release while this ran as a normal
+// synchronous function (every category cut real Lighthouse work, which is
+// what mattered when racing a ~30s ceiling) and restored once the move to
+// a Background Function removed that ceiling — Lighthouse's accessibility
+// category runs axe-core internally, so this one call covers real
+// accessibility scoring for free, which is otherwise a known gap in
+// Technical Audit (see technical-audit.ts's top-of-file comment).
 //
 // Needs a Google PageSpeed Insights API key (free, Google Cloud Console —
 // enable the "PageSpeed Insights API") set as PAGESPEED_API_KEY.
@@ -36,6 +37,7 @@ interface PageSpeedApiResponse {
   lighthouseResult?: {
     categories?: {
       performance?: { score: number | null };
+      accessibility?: { score: number | null };
     };
     audits?: Record<string, LighthouseAudit>;
   };
@@ -44,6 +46,7 @@ interface PageSpeedApiResponse {
 export interface PageSpeedResult {
   url: string;
   performanceScore: number | null;
+  accessibilityScore: number | null;
   lcp: string | null;
   /**
    * Total Blocking Time (Lighthouse audit id "total-blocking-time") —
@@ -120,10 +123,12 @@ export async function runPageSpeedInsights(url: string): Promise<PageSpeedResult
   // desktop (PSI simulates a throttled CPU/network for mobile) — mobile is
   // the traffic that actually matters for this kind of client, and the
   // accuracy of that number was explicitly chosen over the extra reliability
-  // margin desktop would buy. Only "performance" is requested — see this
-  // file's top-of-file comment for why accessibility was dropped.
+  // margin desktop would buy. See this file's top-of-file comment for the
+  // performance/accessibility category choice.
   endpoint.searchParams.set("strategy", "mobile");
-  endpoint.searchParams.set("category", "performance");
+  for (const category of ["performance", "accessibility"]) {
+    endpoint.searchParams.append("category", category);
+  }
 
   // Now running inside a Background Function (up to 15 minutes), not a
   // normal ~30s synchronous request — this budget is a sane upper bound on
@@ -174,6 +179,7 @@ export async function runPageSpeedInsights(url: string): Promise<PageSpeedResult
   return {
     url,
     performanceScore: toPercent(categories.performance?.score),
+    accessibilityScore: toPercent(categories.accessibility?.score),
     lcp: audits["largest-contentful-paint"]?.displayValue ?? null,
     // "total-blocking-time" is Google's own recommended lab proxy for INP.
     // The previous code read audits["interactive"] (Time to Interactive) —
@@ -197,7 +203,7 @@ export function buildPageSpeedMarkdown(auditLabel: string, result: PageSpeedResu
     "## Scores (mobile, 0-100)",
     "",
     `- Performance: ${result.performanceScore ?? "n/a"}`,
-    "- Accessibility: not checked by this step — see the Technical Audit's other sections; a dedicated accessibility pass (e.g. axe-core) is a known follow-up, not yet built.",
+    `- Accessibility: ${result.accessibilityScore ?? "n/a"}`,
     "",
     "## Core Web Vitals",
     "",
