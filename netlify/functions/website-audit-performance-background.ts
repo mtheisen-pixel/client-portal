@@ -53,7 +53,12 @@ async function saveDocument(
   const path = `${clientId}/${Date.now()}-${sanitizeFilename(filename)}`
   const { error: uploadError } = await supabaseAdmin.storage
     .from(BUCKET)
-    .upload(path, Buffer.from(content, 'utf-8'), { contentType: 'text/markdown' })
+    // Explicit charset — without it, a browser/tool viewing the raw file has
+    // to guess the encoding, and content with non-ASCII punctuation (an em
+    // dash in an error message, for instance) can come back double-decoded
+    // as mojibake (e.g. "—" showing as "â€”") even though the bytes uploaded
+    // here are correctly UTF-8.
+    .upload(path, Buffer.from(content, 'utf-8'), { contentType: 'text/markdown; charset=utf-8' })
   if (uploadError) throw uploadError
 
   const { error: insertError } = await supabaseAdmin.from('portal_documents').insert({
