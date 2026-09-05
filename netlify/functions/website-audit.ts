@@ -47,7 +47,7 @@ async function saveDocument(clientId: string, title: string, description: string
   const path = `${clientId}/${Date.now()}-${sanitizeFilename(filename)}`
   const { error: uploadError } = await supabaseAdmin.storage
     .from(BUCKET)
-    .upload(path, Buffer.from(content, 'utf-8'), { contentType: 'text/markdown' })
+    .upload(path, Buffer.from(content, 'utf-8'), { contentType: 'text/markdown; charset=utf-8' })
   if (uploadError) throw uploadError
 
   const { data, error: insertError } = await supabaseAdmin
