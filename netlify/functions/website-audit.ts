@@ -3,7 +3,6 @@ import { createClient } from '@supabase/supabase-js'
 import { authorizeAdminRequest } from './lib/auth'
 import { discoverPages, runWebsiteAudit } from './lib/site-audit'
 import { runTechnicalAuditFast } from './lib/technical-audit'
-import { runPageSpeedInsights, buildPageSpeedMarkdown } from './lib/pagespeed'
 
 // Dedicated function rather than a new action on admin.ts: a crawl can take
 // meaningfully longer than admin.ts's other operations (list/create/delete,
@@ -11,17 +10,20 @@ import { runPageSpeedInsights, buildPageSpeedMarkdown } from './lib/pagespeed'
 // can't affect the reliability of those. Shares admin.ts's password/lockout
 // gate via lib/auth.ts.
 //
-// Three request shapes, distinguished by auditType/step:
+// Two request shapes, distinguished by auditType:
 // - auditType 'creative' (default): the original crawl — page copy, colors/
 //   fonts, screenshots, perceived-tone analysis. One document + screenshots.
-// - auditType 'technical', step 'fast' (default for 'technical'): meta/
-//   structure/schema/hygiene/AI-visibility checks, all plain-HTTP. One
-//   document.
-// - auditType 'technical', step 'performance': Core Web Vitals via Google
-//   PageSpeed Insights. Deliberately its OWN request, not folded into the
-//   'fast' step above — PSI commonly takes 15-30+ seconds on its own,
-//   which risks the ~30s Netlify limit by itself. The Admin.tsx UI fires
-//   these as two sequential calls from one "Run Website Audit" click.
+// - auditType 'technical' (step 'fast', the only step this file still
+//   handles): meta/structure/schema/hygiene/AI-visibility checks, all
+//   plain-HTTP. One document.
+//
+// Core Web Vitals via Google PageSpeed Insights — the third Technical Audit
+// piece — used to be a 'performance' step here too, but PSI's own response
+// time kept exceeding what a synchronous Netlify request can survive even
+// after repeated timeout/scope tuning (see pagespeed.ts's git history). It
+// now runs entirely in website-audit-performance-background.ts, a
+// Background Function with a 15-minute ceiling instead of ~30s — see that
+// file's doc comment for how its caller (Admin.tsx) finds out the result.
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL as string,
   process.env.SUPABASE_SERVICE_ROLE_KEY as string,
@@ -80,12 +82,11 @@ export const handler: Handler = async (event) => {
   const authError = await authorizeAdminRequest(supabaseAdmin, event, body.password)
   if (authError) return json(authError.statusCode, { error: authError.error })
 
-  const { clientId, url, competitorName, auditType, step } = body as {
+  const { clientId, url, competitorName, auditType } = body as {
     clientId?: string
     url?: string
     competitorName?: string
     auditType?: 'creative' | 'technical'
-    step?: 'fast' | 'performance'
   }
   if (!clientId || !url) {
     return json(400, { error: 'clientId and url are required.' })
@@ -114,19 +115,6 @@ export const handler: Handler = async (event) => {
   const today = new Date().toISOString().slice(0, 10)
 
   try {
-    if (isTechnical && step === 'performance') {
-      const result = await runPageSpeedInsights(parsedUrl.toString())
-      const markdown = buildPageSpeedMarkdown(fullLabel, result)
-      const doc = await saveDocument(
-        clientId,
-        `${fullLabel} — ${parsedUrl.hostname} — Performance — ${today}`,
-        `PageSpeed Insights (mobile) performance check for ${parsedUrl.hostname}.`,
-        `website-audit-technical-perf-${parsedUrl.hostname}.md`,
-        markdown
-      )
-      return json(200, { documents: [doc], pagesCrawled: 1 })
-    }
-
     if (isTechnical) {
       const discovered = await discoverPages(parsedUrl.toString())
       const result = await runTechnicalAuditFast(parsedUrl.toString(), discovered)

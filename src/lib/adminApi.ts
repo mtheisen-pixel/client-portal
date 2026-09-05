@@ -1,5 +1,6 @@
 const ENDPOINT = '/.netlify/functions/admin'
 const WEBSITE_AUDIT_ENDPOINT = '/.netlify/functions/website-audit'
+const PERFORMANCE_CHECK_BACKGROUND_ENDPOINT = '/.netlify/functions/website-audit-performance-background'
 
 async function call<T>(password: string, action: string, payload: Record<string, unknown> = {}) {
   // password/action are spread last so a payload field can never shadow them
@@ -83,7 +84,7 @@ export const adminApi = {
     url: string,
     competitorName?: string,
     auditType?: 'creative' | 'technical',
-    step?: 'fast' | 'performance',
+    step?: 'fast',
   ) => {
     const res = await fetch(WEBSITE_AUDIT_ENDPOINT, {
       method: 'POST',
@@ -93,5 +94,25 @@ export const adminApi = {
     const data = await res.json()
     if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`)
     return data as { documents: AdminDocument[]; pagesCrawled: number }
+  },
+
+  // Fire-and-forget: this hits a Netlify Background Function, which returns
+  // a 202 immediately and keeps running for up to 15 minutes — there is no
+  // meaningful response body to parse, and no way to learn success/failure
+  // from this call. The result (or an error) shows up later as a document;
+  // see pollForDocument in Admin.tsx, which is how the caller actually finds
+  // out what happened. See website-audit-performance-background.ts for why
+  // this couldn't stay a normal synchronous request like runWebsiteAudit.
+  startPerformanceCheck: async (
+    password: string,
+    clientId: string,
+    url: string,
+    competitorName?: string,
+  ): Promise<void> => {
+    await fetch(PERFORMANCE_CHECK_BACKGROUND_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password, clientId, url, competitorName }),
+    })
   },
 }

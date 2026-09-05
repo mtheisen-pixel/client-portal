@@ -7,6 +7,45 @@ import { Logo } from '../components/Logo'
 import { SiteHeader } from '../components/SiteHeader'
 import { DOCUMENT_CATEGORIES } from '../lib/categories'
 
+// Mirrors the title format website-audit-performance-background.ts computes
+// server-side — kept in sync manually (small, stable string formatting;
+// see that file's own comment on why this isn't shared code) so the client
+// knows what to poll for immediately after firing the background check,
+// without waiting on a response body that background functions don't give.
+function computeExpectedPerformanceTitle(url: string, competitorName: string): string {
+  const hostname = new URL(url).hostname
+  const auditKindLabel = competitorName ? `Competitor Audit — ${competitorName}` : 'Website Audit'
+  const fullLabel = `${auditKindLabel} (Technical)`
+  const today = new Date().toISOString().slice(0, 10)
+  return `${fullLabel} — ${hostname} — Performance — ${today}`
+}
+
+/**
+ * Polls list_documents until a document with the given exact title shows
+ * up — the only way to learn a Background Function's result, since it has
+ * no synchronous response (see adminApi.startPerformanceCheck). A returned
+ * document with admin_only true is the error-marker path (its description
+ * is the error message); false is the real, successful result.
+ */
+async function pollForDocument(
+  password: string,
+  clientId: string,
+  title: string,
+  timeoutMs = 4 * 60 * 1000,
+  intervalMs = 4000,
+): Promise<AdminDocument> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const { documents } = await adminApi.listDocuments(password, clientId)
+    const match = documents.find((d) => d.title === title)
+    if (match) return match
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+  throw new Error(
+    'The performance check is taking longer than expected. It may still finish in the background — check the document list again in a minute or two.'
+  )
+}
+
 export function Admin() {
   const [password, setPassword] = useState('')
   const [unlocked, setUnlocked] = useState(false)
@@ -143,26 +182,37 @@ export function Admin() {
         const { pagesCrawled } = await adminApi.runWebsiteAudit(password, selectedClientId, url, competitorName || undefined, 'creative')
         setAuditStatus(`Done — crawled ${pagesCrawled} page(s) and saved as a Creative ${label}.`)
       } else {
-        // Two sequential requests, not one — the performance check
-        // (PageSpeed Insights) runs long enough on its own that bundling it
-        // with the fast checks risks the ~30s Netlify limit. See the doc
-        // comment at the top of website-audit.ts.
+        // The fast checks are a normal request/response. The performance
+        // check (PageSpeed Insights) is not — it runs in a Background
+        // Function with no synchronous response, since PSI's own response
+        // time kept exceeding what a normal ~30s request can survive (see
+        // website-audit-performance-background.ts). So this fires it, then
+        // polls list_documents for the document it'll eventually produce.
         setAuditStatus('Running technical checks…')
         const fastResult = await adminApi.runWebsiteAudit(password, selectedClientId, url, competitorName || undefined, 'technical', 'fast')
-        setAuditStatus(`Technical checks done (${fastResult.pagesCrawled} page(s)) — running performance check…`)
+        setAuditStatus(`Technical checks done (${fastResult.pagesCrawled} page(s)) — running performance check in the background…`)
         // Refresh here too, not just at the end — the fast-checks document is
         // already saved server-side at this point, and the performance step
-        // can take long enough that leaving the list stale makes it look like
-        // nothing happened yet.
+        // can take a while longer, so leaving the list stale makes it look
+        // like nothing happened yet.
         await refreshDocs(selectedClientId)
-        await adminApi.runWebsiteAudit(password, selectedClientId, url, competitorName || undefined, 'technical', 'performance')
+
+        await adminApi.startPerformanceCheck(password, selectedClientId, url, competitorName || undefined)
+        const expectedTitle = computeExpectedPerformanceTitle(url, competitorName)
+        const perfDoc = await pollForDocument(password, selectedClientId, expectedTitle)
+        if (perfDoc.admin_only) {
+          throw new Error(perfDoc.description ?? 'Performance check failed.')
+        }
         setAuditStatus(`Done — saved a Technical ${label}, including a performance check.`)
       }
       form.reset()
-      await refreshDocs(selectedClientId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Website audit failed.')
     } finally {
+      // In finally rather than only on the success path — a failed
+      // performance check still leaves a new (error-marker) document behind
+      // that the list should show, not just a successful one.
+      await refreshDocs(selectedClientId).catch(() => {})
       setAuditBusy(false)
     }
   }

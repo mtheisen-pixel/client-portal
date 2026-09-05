@@ -1,34 +1,26 @@
 // Core Web Vitals / performance via Google's PageSpeed Insights API —
-// deliberately its own module and its own Research document, invoked as a
-// separate HTTP request from the rest of Technical Audit's checks (see
-// technical-audit.ts). PSI runs a real Lighthouse audit server-side and
-// commonly takes 15-30+ seconds to respond, which alone can approach or
-// exceed Netlify's ~30s function limit on this plan — so it never gets
-// bundled into the same request as anything else, and it's given the full
-// available request budget (see TOTAL_BUDGET_MS below) rather than a
-// smaller slice.
+// deliberately its own module and its own Research document. PSI runs a
+// real Lighthouse audit server-side and commonly takes 15-30+ seconds to
+// respond, occasionally longer — three rounds of pure timeout/scope tuning
+// (trimming 4 categories to 2, giving the request its full ~27s synchronous
+// budget, then trimming to just "performance") all reduced but never
+// eliminated live timeouts, because PSI's own response time is outside this
+// app's control and has a real right tail. So this call no longer runs
+// inside a normal synchronous Netlify Function at all — it's invoked from
+// netlify/functions/website-audit-performance-background.ts, a Background
+// Function (Netlify's naming convention: filename ends in "-background"),
+// which gets up to 15 minutes instead of ~30 seconds. See that file's doc
+// comment for how a background function's caller finds out the result
+// (there's no synchronous response to return it in).
 //
-// Only "performance" is requested now — not accessibility, best-practices,
-// or seo, all of which PSI can also return in the same call. This request
-// used to also ask for "accessibility" (Lighthouse's accessibility category
-// runs axe-core internally, so that one call covered both for free), but
-// live testing kept timing out even after trimming from 4 categories to 2
-// and giving the request its full ~27s budget — accessibility was the next
-// lever available to cut real Lighthouse work, at the cost of losing that
-// free axe-core coverage (nothing else in Technical Audit covers
+// Only "performance" is requested — not accessibility, best-practices, or
+// seo, all of which PSI can also return in the same call. Losing
+// accessibility here was a deliberate trade made *before* the move to a
+// background function (nothing else in Technical Audit covers
 // accessibility today; see technical-audit.ts's top-of-file comment, where
-// this gap is flagged as a known follow-up). This is a deliberate,
-// discussed trade-off (accuracy of the mobile-strategy Core Web Vitals data
-// mattered more here than keeping accessibility scoring), not a default —
-// see the git history on this file before reaching for another category
-// trim as the next lever.
-//
-// If timeouts persist even with a single category, the real fix is no
-// longer trimmable scope — it's decoupling this call from Netlify's
-// single-request time limit entirely (a longer-running function type, or a
-// poll-for-status pattern instead of one blocking request). That's real new
-// infrastructure, not a tweak, and deliberately not built until trimming to
-// "performance" alone has been confirmed insufficient in practice.
+// this gap is flagged as a known follow-up) — now that this call isn't
+// racing a ~30s ceiling, re-adding "accessibility" back to the category
+// list is a live option again if it's worth the free axe-core coverage.
 //
 // Needs a Google PageSpeed Insights API key (free, Google Cloud Console —
 // enable the "PageSpeed Insights API") set as PAGESPEED_API_KEY.
@@ -133,15 +125,15 @@ export async function runPageSpeedInsights(url: string): Promise<PageSpeedResult
   endpoint.searchParams.set("strategy", "mobile");
   endpoint.searchParams.set("category", "performance");
 
-  // The first attempt gets the full available budget — PSI genuinely
-  // running long is far more common than a fast Lighthouse-run failure, so
-  // shrinking this to make room for a retry (tried previously) just made
-  // real timeouts more likely without meaningfully helping the retry case.
-  // A Lighthouse-run-error response (see isLighthouseRunError) fails fast —
-  // normally within a couple of seconds, nowhere near this budget — so
-  // there's almost always time left over for one retry; that leftover time
-  // is computed below rather than assumed.
-  const TOTAL_BUDGET_MS = 27000;
+  // Now running inside a Background Function (up to 15 minutes), not a
+  // normal ~30s synchronous request — this budget is a sane upper bound on
+  // a single PSI attempt (PSI has never taken anywhere near this long in
+  // practice), not a scarce resource to ration between attempts the way it
+  // used to be. A Lighthouse-run-error response (see isLighthouseRunError)
+  // fails fast — normally within a couple of seconds — so there's
+  // effectively always time left over for one retry; that leftover time is
+  // computed below rather than assumed.
+  const TOTAL_BUDGET_MS = 120000;
   const startedAt = Date.now();
 
   let data: PageSpeedApiResponse;
