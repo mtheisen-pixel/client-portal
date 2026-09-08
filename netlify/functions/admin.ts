@@ -1,5 +1,6 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
+import { marked } from 'marked'
 import { authorizeAdminRequest } from './lib/auth'
 
 // This function is the only place the service_role key is used. It bypasses
@@ -142,6 +143,65 @@ export const handler: Handler = async (event) => {
         if (error) throw error
 
         return json(200, { url: data.signedUrl })
+      }
+
+      case 'get_document_pdf': {
+        // Converts a stored Research document to a downloadable PDF instead
+        // of only being viewable as raw text via get_download_url above —
+        // these documents (competitor/website audit creative and technical
+        // crawls) are always stored as plain Markdown (see
+        // website-audit.ts's `.md` uploads), so this only ever makes sense
+        // for that file type; Admin.tsx gates the button on file_path
+        // ending in .md for the same reason. Reuses the audit app's own
+        // DocRaptor pattern (see its api/reports/[id]/pdf/route.tsx) rather
+        // than an in-process PDF library, for the same reason that file
+        // documents: native/WASM PDF-rendering dependencies inside a
+        // Netlify Function bundle have caused real problems before.
+        const { filePath, title } = body as { filePath?: string; title?: string }
+        if (!filePath) return json(400, { error: 'filePath is required.' })
+
+        const { data: fileData, error: downloadError } = await supabaseAdmin.storage
+          .from(BUCKET)
+          .download(filePath)
+        if (downloadError) throw downloadError
+
+        const markdown = await fileData.text()
+        const bodyHtml = marked.parse(markdown, { async: false })
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+          body { font-family: -apple-system, Helvetica, Arial, sans-serif; line-height: 1.5; padding: 40px; color: #1a1a1a; max-width: 720px; margin: 0 auto; }
+          h1, h2, h3 { color: #0f172a; }
+          pre, code { background: #f1f5f9; padding: 2px 4px; border-radius: 4px; font-size: 0.9em; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td { border: 1px solid #e2e8f0; padding: 6px 10px; text-align: left; }
+        </style></head><body>${bodyHtml}</body></html>`
+
+        const apiKey = process.env.DOCRAPTOR_API_KEY || 'YOUR_API_KEY_HERE'
+        const isTestMode = !process.env.DOCRAPTOR_API_KEY
+        const filenameStem = sanitizeFilename(title ?? 'document').replace(/\s+/g, '-').toLowerCase()
+
+        const docraptorResponse = await fetch('https://api.docraptor.com/docs', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Basic ' + Buffer.from(`${apiKey}:`).toString('base64'),
+          },
+          body: JSON.stringify({
+            type: 'pdf',
+            document_content: html,
+            test: isTestMode,
+            name: `${filenameStem}.pdf`,
+          }),
+        })
+
+        if (!docraptorResponse.ok) {
+          const errorText = await docraptorResponse.text()
+          throw new Error(`PDF generation failed: ${errorText}`)
+        }
+
+        const pdfArrayBuffer = await docraptorResponse.arrayBuffer()
+        const pdfBase64 = Buffer.from(pdfArrayBuffer).toString('base64')
+
+        return json(200, { pdfBase64, filename: `${filenameStem}.pdf` })
       }
 
       case 'delete_document': {

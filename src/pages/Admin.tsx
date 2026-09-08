@@ -58,6 +58,7 @@ export function Admin() {
   const [docs, setDocs] = useState<AdminDocument[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [auditBusy, setAuditBusy] = useState(false)
   const [auditStatus, setAuditStatus] = useState<string | null>(null)
 
@@ -252,6 +253,33 @@ export function Admin() {
     }
   }
 
+  // Only ever offered for .md documents (competitor/website audit creative
+  // and technical crawls, per website-audit.ts) — see the "Download PDF"
+  // button below, which gates on the same extension.
+  async function handleDownloadPdf(doc: AdminDocument) {
+    setError(null)
+    setDownloadingId(doc.id)
+    try {
+      const { pdfBase64, filename } = await adminApi.getDocumentPdf(password, doc.file_path, doc.title)
+      const byteChars = atob(pdfBase64)
+      const bytes = new Uint8Array(byteChars.length)
+      for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i)
+      const blobUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
+
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(blobUrl)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not generate PDF.')
+    } finally {
+      setDownloadingId(null)
+    }
+  }
+
   if (!unlocked) {
     return (
       <div className="page-center">
@@ -343,6 +371,16 @@ export function Admin() {
                       >
                         View
                       </button>
+                      {doc.file_path.endsWith('.md') && (
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => handleDownloadPdf(doc)}
+                          disabled={downloadingId === doc.id}
+                        >
+                          {downloadingId === doc.id ? 'Generating…' : 'Download PDF'}
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="secondary"
