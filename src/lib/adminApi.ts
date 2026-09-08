@@ -70,6 +70,13 @@ export const adminApi = {
   getDownloadUrl: (password: string, filePath: string) =>
     call<{ url: string }>(password, 'get_download_url', { filePath }),
 
+  // Converts a stored document (Markdown, per website-audit.ts) to a real
+  // PDF via DocRaptor and returns it as base64 rather than a URL — there's
+  // no stored file to point a signed URL at, since this is generated
+  // on-demand from get_download_url's same underlying content.
+  getDocumentPdf: (password: string, filePath: string, title: string) =>
+    call<{ pdfBase64: string; filename: string }>(password, 'get_document_pdf', { filePath, title }),
+
   // Separate endpoint, not the action-dispatched `call` above — a crawl can
   // run much longer than admin.ts's other near-instant operations, see
   // netlify/functions/website-audit.ts. A non-empty competitorName runs the
