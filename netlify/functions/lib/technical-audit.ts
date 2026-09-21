@@ -596,8 +596,8 @@ async function checkRedirectConsistency(origin: string, sampledPageUrls: string[
   return notes;
 }
 
-/** Fetches the sitemap URL(s) discovered in robots.txt (falling back to the default /sitemap.xml location if none were listed), confirms it parses as XML, counts URLs, and status-checks a bounded SAMPLE of them — clearly labeled as such, not a full-site check. */
-async function validateSitemap(origin: string, sitemapUrls: string[], crawledUrls: string[]): Promise<string[]> {
+/** Fetches the sitemap URL(s) discovered in robots.txt (falling back to the default /sitemap.xml location if none were listed), confirms it parses as XML, and counts URLs — always. The bounded status-check SAMPLE of those URLs (clearly labeled as such, not a full-site check) only runs when `sampleUrls` is true (the Comprehensive tier) — it's the slow/external-request half of this check, the parse/count half is cheap and deterministic so both tiers get it. */
+async function validateSitemap(origin: string, sitemapUrls: string[], crawledUrls: string[], sampleUrls: boolean): Promise<string[]> {
   const candidateUrl = sitemapUrls[0] ?? `${origin}/sitemap.xml`;
   const res = await fetchText(candidateUrl, 8000);
   if (!res || res.status !== 200) {
@@ -614,7 +614,9 @@ async function validateSitemap(origin: string, sitemapUrls: string[], crawledUrl
     `Sitemap (${candidateUrl}): valid XML${isIndex ? ", a sitemap INDEX" : ""}, ${isIndex ? "referencing" : "listing"} ${locs.length} URL${locs.length === 1 ? "" : "s"}${isIndex ? " (sub-sitemaps, not individually checked here)" : ""}.`,
   ];
 
-  if (!isIndex && locs.length > 0) {
+  if (!sampleUrls) {
+    notes.push("Sitemap URL status sampling and crawl cross-check: not run at the Light tier — run Comprehensive for this check.");
+  } else if (!isIndex && locs.length > 0) {
     const sample = locs.slice(0, SITEMAP_URL_CHECK_SAMPLE);
     const statusResults = await Promise.all(
       sample.map(async (loc) => {
@@ -652,15 +654,32 @@ export interface TechnicalAuditResult {
 }
 
 /**
- * Runs the fast (plain-HTTP, no Browserless) half of a Technical Audit:
- * meta/indexability, structure/hierarchy, structured data, local SEO,
- * technical hygiene (incl. security headers, mixed content, redirect
- * consistency), analytics/conversion-tracking presence, and AI-visibility
- * checks. The Core Web Vitals / PageSpeed Insights piece is a separate
- * function (pagespeed.ts) invoked as its own request — see that file's doc
- * comment for why.
+ * Runs the fast (plain-HTTP, no Browserless) half of a Technical Audit, in
+ * two depth tiers:
+ *
+ * - "light": meta/indexability, structure/hierarchy, structured data,
+ *   technical hygiene (security headers, semantic HTML, mixed content —
+ *   NOT redirect-chain consistency), and analytics/conversion-tracking
+ *   presence. Every check here is a handful of already-fetched-page string
+ *   parses or one cheap extra fetch — no sampling loops, no Claude call.
+ * - "comprehensive": everything light has, plus the slower/sampling checks
+ *   (internal-link sampling, sitemap URL sampling, redirect-chain
+ *   consistency walking) and the sections that need more evidence to be
+ *   worth including at all (Local SEO/NAP + vertical schema hints,
+ *   AI Visibility/GEO — including the Claude-backed AI-summarizability
+ *   note via tone-analysis.ts).
+ *
+ * The Core Web Vitals / PageSpeed Insights piece is always a separate
+ * function (pagespeed.ts) invoked as its own request, comprehensive-tier
+ * only — see that file's doc comment for why it's split out, and
+ * website-audit.ts for the depth→performance-check wiring.
  */
-export async function runTechnicalAuditFast(siteUrl: string, discoveredPages: string[]): Promise<TechnicalAuditResult> {
+export async function runTechnicalAuditFast(
+  siteUrl: string,
+  discoveredPages: string[],
+  depth: "light" | "comprehensive"
+): Promise<TechnicalAuditResult> {
+  const isComprehensive = depth === "comprehensive";
   const origin = new URL(siteUrl).origin;
   const pageUrls = discoveredPages.slice(0, TECH_MAX_PAGES);
 
@@ -690,12 +709,12 @@ export async function runTechnicalAuditFast(siteUrl: string, discoveredPages: st
   const hasHsts = httpsRes?.headers.get("strict-transport-security") != null;
 
   const [linkIssues, custom404, llmsTxtExists, geoReadability, sitemapNotes, redirectNotes] = await Promise.all([
-    checkInternalLinks(origin, pages),
+    isComprehensive ? checkInternalLinks(origin, pages) : Promise.resolve<string[]>([]),
     checkCustom404(origin),
-    checkLlmsTxt(origin),
-    checkGeoReadability(httpsRes?.text ?? ""),
-    validateSitemap(origin, robotsInfo.sitemapUrls, fetchedUrls),
-    checkRedirectConsistency(origin, fetchedUrls),
+    isComprehensive ? checkLlmsTxt(origin) : Promise.resolve(false),
+    isComprehensive ? checkGeoReadability(httpsRes?.text ?? "") : Promise.resolve(""),
+    validateSitemap(origin, robotsInfo.sitemapUrls, fetchedUrls, isComprehensive),
+    isComprehensive ? checkRedirectConsistency(origin, fetchedUrls) : Promise.resolve<string[]>([]),
   ]);
 
   const duplicateTitles = findDuplicates(pages, "title");
@@ -715,10 +734,10 @@ export async function runTechnicalAuditFast(siteUrl: string, discoveredPages: st
   );
 
   const semanticNotes = checkSemanticHtml(httpsRes?.text ?? "");
-  const localSeoNotes = buildLocalSeoNotes(pages, discoveredPages, httpsRes?.text ?? "");
+  const localSeoNotes = isComprehensive ? buildLocalSeoNotes(pages, discoveredPages, httpsRes?.text ?? "") : [];
 
   const sections = [
-    `# Website Audit (Technical) — ${origin.replace(/^https?:\/\//, "")}`,
+    `# SEO Audit (${isComprehensive ? "Comprehensive" : "Light"}) — ${origin.replace(/^https?:\/\//, "")}`,
     "",
     `${pages.length} page(s) checked.`,
     "",

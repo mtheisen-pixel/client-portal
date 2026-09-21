@@ -77,7 +77,11 @@ export const adminApi = {
   // client's own — same document category/storage pattern, just tagged
   // "Competitor Audit — {name}" instead of "Website Audit" so Findings can
   // tell the two apart. auditType/step select which crawl runs — see the
-  // doc comment at the top of website-audit.ts for the three shapes.
+  // doc comment at the top of website-audit.ts for the three shapes. depth
+  // only matters for auditType 'technical' ("SEO Audit" in the UI) — see
+  // technical-audit.ts. reviewUrl/handoffError are only present for the
+  // Light tier; Comprehensive's review link arrives later via the
+  // performance doc — see pollForReviewUrl below.
   runWebsiteAudit: async (
     password: string,
     clientId: string,
@@ -85,15 +89,21 @@ export const adminApi = {
     competitorName?: string,
     auditType?: 'creative' | 'technical',
     step?: 'fast',
+    depth?: 'light' | 'comprehensive',
   ) => {
     const res = await fetch(WEBSITE_AUDIT_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password, clientId, url, competitorName, auditType, step }),
+      body: JSON.stringify({ password, clientId, url, competitorName, auditType, step, depth }),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`)
-    return data as { documents: AdminDocument[]; pagesCrawled: number }
+    return data as {
+      documents: AdminDocument[]
+      pagesCrawled: number
+      reviewUrl?: string
+      handoffError?: string
+    }
   },
 
   // Fire-and-forget: this hits a Netlify Background Function, which returns
@@ -103,16 +113,20 @@ export const adminApi = {
   // see pollForDocument in Admin.tsx, which is how the caller actually finds
   // out what happened. See website-audit-performance-background.ts for why
   // this couldn't stay a normal synchronous request like runWebsiteAudit.
+  // technicalDocumentId is the id of the doc runWebsiteAudit already saved —
+  // passed through so the background function can attach it (alongside its
+  // own performance doc) to the Audit app review-report handoff.
   startPerformanceCheck: async (
     password: string,
     clientId: string,
     url: string,
+    technicalDocumentId: string,
     competitorName?: string,
   ): Promise<void> => {
     await fetch(PERFORMANCE_CHECK_BACKGROUND_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password, clientId, url, competitorName }),
+      body: JSON.stringify({ password, clientId, url, competitorName, technicalDocumentId }),
     })
   },
 }
