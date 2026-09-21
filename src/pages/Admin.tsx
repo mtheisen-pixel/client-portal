@@ -46,6 +46,35 @@ async function pollForDocument(
   )
 }
 
+const REVIEW_URL_PATTERN = /Review & approve: (\S+)/
+
+/**
+ * Short, best-effort secondary poll for the Audit app review-report link
+ * on a Comprehensive SEO Audit's performance document. The link can only
+ * be attached after that document already exists (see
+ * website-audit-performance-background.ts's appendToDescription), so
+ * there's a brief window right after pollForDocument finds the document
+ * where the link isn't there yet. Never throws — a caller that doesn't get
+ * a link back just shows plain success text instead of a review CTA.
+ */
+async function pollForReviewUrl(
+  password: string,
+  clientId: string,
+  documentId: string,
+  timeoutMs = 15000,
+  intervalMs = 3000,
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const { documents } = await adminApi.listDocuments(password, clientId)
+    const match = documents.find((d) => d.id === documentId)
+    const found = match?.description?.match(REVIEW_URL_PATTERN)?.[1]
+    if (found) return found
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+  return null
+}
+
 export function Admin() {
   const [password, setPassword] = useState('')
   const [unlocked, setUnlocked] = useState(false)
@@ -60,6 +89,8 @@ export function Admin() {
   const [busy, setBusy] = useState(false)
   const [auditBusy, setAuditBusy] = useState(false)
   const [auditStatus, setAuditStatus] = useState<string | null>(null)
+  const [auditReviewUrl, setAuditReviewUrl] = useState<string | null>(null)
+  const [selectedAuditType, setSelectedAuditType] = useState<'creative' | 'technical'>('creative')
 
   async function tryUnlock(candidate: string) {
     setAuthError(null)
@@ -166,6 +197,7 @@ export function Admin() {
     if (!selectedClientId) return
     setError(null)
     setAuditStatus(null)
+    setAuditReviewUrl(null)
     setAuditBusy(true)
 
     try {
@@ -176,36 +208,81 @@ export function Admin() {
       const auditType = (String(fd.get('auditType') ?? 'creative') === 'technical' ? 'technical' : 'creative') as
         | 'creative'
         | 'technical'
+      const depth = (String(fd.get('auditDepth') ?? 'light') === 'comprehensive' ? 'comprehensive' : 'light') as
+        | 'light'
+        | 'comprehensive'
       const label = competitorName ? `Competitor Audit for "${competitorName}"` : 'Website Audit'
 
       if (auditType === 'creative') {
         const { pagesCrawled } = await adminApi.runWebsiteAudit(password, selectedClientId, url, competitorName || undefined, 'creative')
         setAuditStatus(`Done — crawled ${pagesCrawled} page(s) and saved as a Creative ${label}.`)
+      } else if (depth === 'light') {
+        // Light tier is a single synchronous request — the crawl, the
+        // checks, and (server-side) the handoff that creates a draft
+        // review report in the Audit app all happen within this one call.
+        setAuditStatus('Running Light SEO checks…')
+        const result = await adminApi.runWebsiteAudit(
+          password,
+          selectedClientId,
+          url,
+          competitorName || undefined,
+          'technical',
+          'fast',
+          'light',
+        )
+        if (result.reviewUrl) {
+          setAuditReviewUrl(result.reviewUrl)
+          setAuditStatus(`Done — saved a Light SEO Audit for ${label}. A draft review report is ready.`)
+        } else {
+          setAuditStatus(
+            `Done — saved a Light SEO Audit for ${label}, but couldn't create a review report${
+              result.handoffError ? `: ${result.handoffError}` : '.'
+            } The crawl data is saved either way — retry from the Audit app if needed.`,
+          )
+        }
       } else {
-        // The fast checks are a normal request/response. The performance
-        // check (PageSpeed Insights) is not — it runs in a Background
-        // Function with no synchronous response, since PSI's own response
-        // time kept exceeding what a normal ~30s request can survive (see
-        // website-audit-performance-background.ts). So this fires it, then
-        // polls list_documents for the document it'll eventually produce.
-        setAuditStatus('Running technical checks…')
-        const fastResult = await adminApi.runWebsiteAudit(password, selectedClientId, url, competitorName || undefined, 'technical', 'fast')
-        setAuditStatus(`Technical checks done (${fastResult.pagesCrawled} page(s)) — running performance check in the background…`)
+        // Comprehensive: the fast checks are a normal request/response. The
+        // performance check (PageSpeed Insights) is not — it runs in a
+        // Background Function with no synchronous response, since PSI's own
+        // response time kept exceeding what a normal ~30s request can
+        // survive (see website-audit-performance-background.ts). So this
+        // fires it, then polls list_documents for the document it'll
+        // eventually produce — the review-report handoff (covering both
+        // documents) happens server-side as part of that background run.
+        setAuditStatus('Running Comprehensive SEO checks…')
+        const fastResult = await adminApi.runWebsiteAudit(
+          password,
+          selectedClientId,
+          url,
+          competitorName || undefined,
+          'technical',
+          'fast',
+          'comprehensive',
+        )
+        setAuditStatus(`SEO checks done (${fastResult.pagesCrawled} page(s)) — running performance check in the background…`)
         // Refresh here too, not just at the end — the fast-checks document is
         // already saved server-side at this point, and the performance step
         // can take a while longer, so leaving the list stale makes it look
         // like nothing happened yet.
         await refreshDocs(selectedClientId)
 
-        await adminApi.startPerformanceCheck(password, selectedClientId, url, competitorName || undefined)
+        const technicalDocumentId = fastResult.documents[0]?.id
+        await adminApi.startPerformanceCheck(password, selectedClientId, url, technicalDocumentId ?? '', competitorName || undefined)
         const expectedTitle = computeExpectedPerformanceTitle(url, competitorName)
         const perfDoc = await pollForDocument(password, selectedClientId, expectedTitle)
         if (perfDoc.admin_only) {
           throw new Error(perfDoc.description ?? 'Performance check failed.')
         }
-        setAuditStatus(`Done — saved a Technical ${label}, including a performance check.`)
+        setAuditStatus(`Done — saved a Comprehensive SEO Audit for ${label}, including a performance check.`)
+        // Best-effort: the review link is attached to this same document a
+        // little after it's first saved (see appendToDescription in
+        // website-audit-performance-background.ts) — a short extra poll,
+        // not a hard requirement for reporting success.
+        const reviewUrl = await pollForReviewUrl(password, selectedClientId, perfDoc.id)
+        if (reviewUrl) setAuditReviewUrl(reviewUrl)
       }
       form.reset()
+      setSelectedAuditType('creative')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Website audit failed.')
     } finally {
@@ -423,19 +500,57 @@ export function Admin() {
 
                 <label>Audit type</label>
                 <label className="checkbox-field">
-                  <input type="radio" name="auditType" value="creative" defaultChecked />
+                  <input
+                    type="radio"
+                    name="auditType"
+                    value="creative"
+                    checked={selectedAuditType === 'creative'}
+                    onChange={() => setSelectedAuditType('creative')}
+                  />
                   Creative Audit — page copy, color/font summary, screenshots, perceived tone
                 </label>
                 <label className="checkbox-field">
-                  <input type="radio" name="auditType" value="technical" />
-                  Technical Audit — SEO/technical health, structured data, Core Web Vitals
+                  <input
+                    type="radio"
+                    name="auditType"
+                    value="technical"
+                    checked={selectedAuditType === 'technical'}
+                    onChange={() => setSelectedAuditType('technical')}
+                  />
+                  SEO Audit — SEO/technical health, structured data, Core Web Vitals
                 </label>
+
+                {selectedAuditType === 'technical' && (
+                  <>
+                    <label>SEO Audit depth</label>
+                    <label className="checkbox-field">
+                      <input type="radio" name="auditDepth" value="light" defaultChecked />
+                      Light — fast checks only (meta, structure, schema, hygiene, analytics)
+                    </label>
+                    <label className="checkbox-field">
+                      <input type="radio" name="auditDepth" value="comprehensive" />
+                      Comprehensive — adds Local SEO, redirect health, AI Visibility/GEO, and a
+                      Core Web Vitals performance check
+                    </label>
+                    <p className="muted" style={{ marginTop: 4 }}>
+                      Either depth drafts a review report in the Audit app — a consultant edits
+                      and approves it there before anything reaches the client.
+                    </p>
+                  </>
+                )}
 
                 <button type="submit" disabled={auditBusy}>
                   {auditBusy ? 'Running audit…' : 'Run Website Audit'}
                 </button>
               </form>
               {auditStatus && <p className="muted">{auditStatus}</p>}
+              {auditReviewUrl && (
+                <p>
+                  <a href={auditReviewUrl} target="_blank" rel="noreferrer">
+                    Review &amp; finalize this SEO Audit in the Audit app ↗
+                  </a>
+                </p>
+              )}
             </>
           )}
         </section>

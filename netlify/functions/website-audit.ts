@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { authorizeAdminRequest } from './lib/auth'
 import { discoverPages, runWebsiteAudit } from './lib/site-audit'
 import { runTechnicalAuditFast } from './lib/technical-audit'
+import { createSeoStudioReport } from './lib/seo-studio-handoff'
 
 // Dedicated function rather than a new action on admin.ts: a crawl can take
 // meaningfully longer than admin.ts's other operations (list/create/delete,
@@ -13,17 +14,27 @@ import { runTechnicalAuditFast } from './lib/technical-audit'
 // Two request shapes, distinguished by auditType:
 // - auditType 'creative' (default): the original crawl — page copy, colors/
 //   fonts, screenshots, perceived-tone analysis. One document + screenshots.
-// - auditType 'technical' (step 'fast', the only step this file still
-//   handles): meta/structure/schema/hygiene/AI-visibility checks, all
-//   plain-HTTP. One document.
+//   Fully automated still — out of scope for the SEO Audit review workflow.
+// - auditType 'technical' ("SEO Audit" in the UI; the internal value stays
+//   'technical' rather than being renamed): meta/structure/schema/hygiene/
+//   AI-visibility checks, all plain-HTTP, run at one of two `depth` tiers
+//   ('light' | 'comprehensive' — see technical-audit.ts). One document.
+//   Unlike Creative, this now hands its Research document(s) off to the
+//   Audit app's seo_studio review pipeline (see lib/seo-studio-handoff.ts)
+//   instead of leaving the AI-touched content (the GEO-readiness note) go
+//   straight to the client unreviewed — for the Light tier that handoff
+//   happens right here, once this document is saved; for Comprehensive it
+//   happens later, in website-audit-performance-background.ts, once both
+//   documents (technical + performance) exist.
 //
-// Core Web Vitals via Google PageSpeed Insights — the third Technical Audit
-// piece — used to be a 'performance' step here too, but PSI's own response
-// time kept exceeding what a synchronous Netlify request can survive even
-// after repeated timeout/scope tuning (see pagespeed.ts's git history). It
-// now runs entirely in website-audit-performance-background.ts, a
-// Background Function with a 15-minute ceiling instead of ~30s — see that
-// file's doc comment for how its caller (Admin.tsx) finds out the result.
+// Core Web Vitals via Google PageSpeed Insights — the Comprehensive tier's
+// extra piece — used to be a 'performance' step here too, but PSI's own
+// response time kept exceeding what a synchronous Netlify request can
+// survive even after repeated timeout/scope tuning (see pagespeed.ts's git
+// history). It now runs entirely in
+// website-audit-performance-background.ts, a Background Function with a
+// 15-minute ceiling instead of ~30s — see that file's doc comment for how
+// its caller (Admin.tsx) finds out the result.
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL as string,
   process.env.SUPABASE_SERVICE_ROLE_KEY as string,
@@ -82,15 +93,17 @@ export const handler: Handler = async (event) => {
   const authError = await authorizeAdminRequest(supabaseAdmin, event, body.password)
   if (authError) return json(authError.statusCode, { error: authError.error })
 
-  const { clientId, url, competitorName, auditType } = body as {
+  const { clientId, url, competitorName, auditType, depth } = body as {
     clientId?: string
     url?: string
     competitorName?: string
     auditType?: 'creative' | 'technical'
+    depth?: 'light' | 'comprehensive'
   }
   if (!clientId || !url) {
     return json(400, { error: 'clientId and url are required.' })
   }
+  const auditDepth: 'light' | 'comprehensive' = depth === 'comprehensive' ? 'comprehensive' : 'light'
 
   let parsedUrl: URL
   try {
@@ -116,17 +129,52 @@ export const handler: Handler = async (event) => {
 
   try {
     if (isTechnical) {
+      const depthLabel = auditDepth === 'comprehensive' ? 'Comprehensive' : 'Light'
       const discovered = await discoverPages(parsedUrl.toString())
-      const result = await runTechnicalAuditFast(parsedUrl.toString(), discovered)
+      const result = await runTechnicalAuditFast(parsedUrl.toString(), discovered, auditDepth)
       const doc = await saveDocument(
         clientId,
-        `${fullLabel} — ${result.hostname} — ${today}`,
+        // fullLabel/"(Technical)" must stay exactly as-is — the Audit app's
+        // Findings-evidence citation classifier keys off "starts with
+        // 'Website Audit'/'Competitor Audit —'" and "contains '(Technical)'"
+        // (see the comment above on trimmedCompetitorName). The depth tier
+        // is appended as a separate trailing segment so that matching still
+        // holds.
+        `${fullLabel} — ${result.hostname} — ${depthLabel} — ${today}`,
         isCompetitor
-          ? `Automated technical check of ${result.pagesCrawled} page(s) on ${result.hostname}, added as competitor "${trimmedCompetitorName}".`
-          : `Automated technical check of ${result.pagesCrawled} page(s) on ${result.hostname}.`,
-        `website-audit-technical-${result.hostname}.md`,
+          ? `Automated ${depthLabel.toLowerCase()} SEO check of ${result.pagesCrawled} page(s) on ${result.hostname}, added as competitor "${trimmedCompetitorName}".`
+          : `Automated ${depthLabel.toLowerCase()} SEO check of ${result.pagesCrawled} page(s) on ${result.hostname}.`,
+        `seo-audit-${auditDepth}-${result.hostname}.md`,
         result.markdown
       )
+
+      // Comprehensive still has a performance leg to run (kicked off
+      // separately by Admin.tsx via startPerformanceCheck) — the handoff to
+      // the Audit app's review pipeline happens once for both documents
+      // together, from website-audit-performance-background.ts, not here.
+      if (auditDepth === 'light') {
+        let reviewUrl: string | undefined
+        let handoffError: string | undefined
+        try {
+          const { data: portalClient } = await supabaseAdmin
+            .from('portal_clients')
+            .select('company_name')
+            .eq('id', clientId)
+            .single()
+          const handoff = await createSeoStudioReport({
+            portalClientId: clientId,
+            clientName: (portalClient?.company_name as string | undefined) ?? result.hostname,
+            auditDepth: 'light',
+            performanceData: 'missing',
+            researchDocumentIds: [doc.id as string],
+          })
+          reviewUrl = handoff.reviewUrl
+        } catch (err) {
+          handoffError = err instanceof Error ? err.message : 'Failed to create a review report in the Audit app.'
+        }
+        return json(200, { documents: [doc], pagesCrawled: result.pagesCrawled, reviewUrl, handoffError })
+      }
+
       return json(200, { documents: [doc], pagesCrawled: result.pagesCrawled })
     }
 
