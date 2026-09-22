@@ -81,6 +81,37 @@ Once deployed, go to `/admin`, enter the admin password, and:
    choose a file, and upload. It appears in their document list
    immediately.
 
+## Running an Audit (day to day)
+
+The "Run a website audit" form on `/admin` runs one of two Audits against a
+client's site (or a named competitor's). Both save their crawl output as
+internal `Research`-category documents, invisible to the client in
+`Documents.tsx` — they're evidence for a human review step, not a finished
+deliverable:
+
+- **Creative Audit** — page copy, color/font summary, screenshots,
+  perceived brand tone. Fully automated: the saved document is the final
+  output, with no review step.
+- **SEO Audit** — meta/indexability, structured data, technical hygiene,
+  and (Comprehensive tier only) Local SEO, redirect-chain consistency,
+  Core Web Vitals, and AI Visibility/GEO readiness. Choose a depth:
+  - **Light** — fast, deterministic checks only.
+  - **Comprehensive** — everything Light has, plus the checks above and a
+    PageSpeed Insights performance check (runs in the background; can take
+    a few minutes).
+
+  Unlike Creative Audit, an SEO Audit is **not** the final output — once
+  the crawl finishes, this app automatically hands the Research
+  document(s) off to the sibling `audit` app (see its README's "Audits"
+  section), which creates a draft review report there. `/admin` shows a
+  "Review & finalize in Audit app ↗" link once that's ready; a consultant
+  edits/approves the AI-drafted Findings and Opportunity Recommendations
+  there before anything reaches the client (`/client-view/[id]` in that
+  app). This requires `AUDIT_APP_BASE_URL` / `SEO_STUDIO_HANDOFF_SECRET`
+  to be set on both apps' Netlify sites (see `.env.example`) — without
+  them, the crawl still saves its Research document, but the handoff fails
+  and no review report gets created.
+
 ## Database
 
 The schema lives in `supabase/migrations/`. It has already been applied to
