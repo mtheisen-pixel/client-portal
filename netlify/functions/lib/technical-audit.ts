@@ -43,8 +43,28 @@ async function fetchText(url: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<{ s
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), headers: { "User-Agent": USER_AGENT } });
     return { status: res.status, text: await res.text(), headers: res.headers };
-  } catch {
+  } catch (err) {
+    // Logged (not just discarded) so a real cause — DNS failure, TLS error,
+    // connection reset, timeout, a WAF/bot-protection block — is visible in
+    // Netlify's function logs instead of collapsing into an unexplained
+    // null every caller treats identically. See fetchPageForAudit below for
+    // the one caller (the initial per-page crawl) that also surfaces this
+    // in the error message shown to staff, since "could not fetch any
+    // pages" alone gives no hint why.
+    console.error(`[technical-audit] fetch failed for ${url}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
+  }
+}
+
+/** Same fetch as fetchText, but keeps the failure reason instead of collapsing it to null — used only for the initial per-page crawl below, so a total failure can say WHY (timeout / DNS / connection reset / likely bot-blocking) rather than just that it failed. */
+async function fetchPageForAudit(url: string): Promise<{ status: number; text: string; headers: Headers } | { error: string }> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: { "User-Agent": USER_AGENT } });
+    return { status: res.status, text: await res.text(), headers: res.headers };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[technical-audit] fetch failed for ${url}: ${message}`);
+    return { error: message };
   }
 }
 
@@ -683,16 +703,20 @@ export async function runTechnicalAuditFast(
   const origin = new URL(siteUrl).origin;
   const pageUrls = discoveredPages.slice(0, TECH_MAX_PAGES);
 
-  const [fetched, robotsInfo] = await Promise.all([Promise.all(pageUrls.map((url) => fetchText(url))), checkRobotsAndAI(origin)]);
+  const [fetched, robotsInfo] = await Promise.all([Promise.all(pageUrls.map((url) => fetchPageForAudit(url))), checkRobotsAndAI(origin)]);
 
   const pages: PageReport[] = [];
   const fetchedUrls: string[] = [];
+  const fetchErrors: string[] = [];
   const mixedContentNotes: string[] = [];
   const analyticsFound = new Set<string>();
   const conversionSignals = new Set<string>();
   pageUrls.forEach((url, i) => {
     const f = fetched[i];
-    if (!f) return;
+    if ("error" in f) {
+      fetchErrors.push(`${url}: ${f.error}`);
+      return;
+    }
     pages.push(analyzePage(url, f.text));
     fetchedUrls.push(url);
     for (const a of detectAnalytics(f.text)) analyticsFound.add(a);
@@ -702,10 +726,18 @@ export async function runTechnicalAuditFast(
   });
 
   if (pages.length === 0) {
-    throw new Error(`Could not fetch any pages for ${siteUrl}.`);
+    // Every attempt failed at the request level (not a 4xx/5xx — those
+    // still return a page here) — most commonly a timeout, DNS failure, or
+    // the site's bot/WAF protection rejecting the crawler's request
+    // entirely. Surface the first real reason instead of a bare "could not
+    // fetch," since that alone gives staff nothing to act on.
+    const reason = fetchErrors[0]?.split(": ").slice(1).join(": ");
+    throw new Error(
+      `Could not fetch any pages for ${siteUrl}.${reason ? ` (${reason})` : ""} This can happen if the site blocks automated requests (bot/WAF protection) or is temporarily unreachable — try again, or check the target site's protection settings if it persists.`
+    );
   }
 
-  const httpsRes = fetched.find((f) => f !== null) ?? null;
+  const httpsRes = fetched.find((f): f is { status: number; text: string; headers: Headers } => !("error" in f)) ?? null;
   const hasHsts = httpsRes?.headers.get("strict-transport-security") != null;
 
   const [linkIssues, custom404, llmsTxtExists, geoReadability, sitemapNotes, redirectNotes] = await Promise.all([
