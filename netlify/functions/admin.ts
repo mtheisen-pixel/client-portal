@@ -17,6 +17,35 @@ function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_')
 }
 
+interface ClientRow {
+  id: string
+  company_name: string
+  created_at: string
+  logo_path: string | null
+  archived_at?: string | null
+}
+
+// Batch-signs every client's logo_path in one storage call rather than one
+// round-trip per row — logos live in the same private bucket as documents,
+// so (like a document's own download URL) there's no public URL to just
+// return as-is. Short-lived, same as get_download_url: long enough for an
+// admin list to render, not worth persisting.
+async function withLogoUrls<T extends ClientRow>(clients: T[]): Promise<(T & { logo_url: string | null })[]> {
+  const paths = clients.map((c) => c.logo_path).filter((p): p is string => Boolean(p))
+  if (paths.length === 0) {
+    return clients.map((c) => ({ ...c, logo_url: null }))
+  }
+
+  const { data, error } = await supabaseAdmin.storage.from(BUCKET).createSignedUrls(paths, 300)
+  if (error) throw error
+
+  const urlByPath = new Map((data ?? []).map((d) => [d.path, d.signedUrl] as const))
+  return clients.map((c) => ({
+    ...c,
+    logo_url: c.logo_path ? (urlByPath.get(c.logo_path) ?? null) : null,
+  }))
+}
+
 export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' }
@@ -39,10 +68,63 @@ export const handler: Handler = async (event) => {
       case 'list_clients': {
         const { data, error } = await supabaseAdmin
           .from('portal_clients')
-          .select('id, company_name, created_at')
+          .select('id, company_name, created_at, logo_path')
+          .is('archived_at', null)
           .order('company_name')
         if (error) throw error
-        return json(200, { clients: data })
+        return json(200, { clients: await withLogoUrls(data ?? []) })
+      }
+
+      case 'list_archived_clients': {
+        const { data, error } = await supabaseAdmin
+          .from('portal_clients')
+          .select('id, company_name, created_at, logo_path, archived_at')
+          .not('archived_at', 'is', null)
+          .order('archived_at', { ascending: false })
+        if (error) throw error
+        return json(200, { clients: await withLogoUrls(data ?? []) })
+      }
+
+      case 'archive_client': {
+        const { clientId } = body as { clientId?: string }
+        if (!clientId) return json(400, { error: 'clientId is required.' })
+
+        const { error } = await supabaseAdmin
+          .from('portal_clients')
+          .update({ archived_at: new Date().toISOString() })
+          .eq('id', clientId)
+        if (error) throw error
+        return json(200, { ok: true })
+      }
+
+      case 'unarchive_client': {
+        const { clientId } = body as { clientId?: string }
+        if (!clientId) return json(400, { error: 'clientId is required.' })
+
+        const { error } = await supabaseAdmin
+          .from('portal_clients')
+          .update({ archived_at: null })
+          .eq('id', clientId)
+        if (error) throw error
+        return json(200, { ok: true })
+      }
+
+      // Set (or clear, with logoPath: null) a client's logo. Two-step, like
+      // document uploads: the browser already used create_upload_url +
+      // uploadToSignedUrl to put the file in storage, and this just records
+      // where it landed. Kept separate from create_client because the
+      // client's id (used as the upload path prefix) doesn't exist until
+      // create_client returns.
+      case 'set_client_logo': {
+        const { clientId, logoPath } = body as { clientId?: string; logoPath?: string | null }
+        if (!clientId) return json(400, { error: 'clientId is required.' })
+
+        const { error } = await supabaseAdmin
+          .from('portal_clients')
+          .update({ logo_path: logoPath ?? null })
+          .eq('id', clientId)
+        if (error) throw error
+        return json(200, { ok: true })
       }
 
       case 'create_client': {
