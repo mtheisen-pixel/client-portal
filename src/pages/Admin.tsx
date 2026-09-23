@@ -87,6 +87,9 @@ export function Admin() {
   const [docs, setDocs] = useState<AdminDocument[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [view, setView] = useState<'clients' | 'archive'>('clients')
+  const [archivedClients, setArchivedClients] = useState<AdminClient[]>([])
+  const [archiveLoading, setArchiveLoading] = useState(false)
   const [auditBusy, setAuditBusy] = useState(false)
   const [auditStatus, setAuditStatus] = useState<string | null>(null)
   const [auditReviewUrl, setAuditReviewUrl] = useState<string | null>(null)
@@ -138,16 +141,77 @@ export function Admin() {
     setBusy(true)
     try {
       const fd = new FormData(form)
-      await adminApi.createClient(
+      const { client } = await adminApi.createClient(
         password,
         String(fd.get('email')),
         String(fd.get('clientPassword')),
         String(fd.get('companyName')),
       )
+
+      // Logo is optional and uploaded as a second step, same shape as a
+      // document upload — it needs the new client's id as the storage path
+      // prefix, which doesn't exist until createClient above returns.
+      const logo = fd.get('logo') as File | null
+      if (logo && logo.size > 0) {
+        const { path, token } = await adminApi.createUploadUrl(password, client.id, logo.name)
+        const { error: uploadError } = await supabase.storage
+          .from('client-documents')
+          .uploadToSignedUrl(path, token, logo)
+        if (uploadError) throw uploadError
+        await adminApi.setClientLogo(password, client.id, path)
+      }
+
       form.reset()
       await refreshClients()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create client.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function refreshArchivedClients() {
+    setArchiveLoading(true)
+    try {
+      const { clients } = await adminApi.listArchivedClients(password)
+      setArchivedClients(clients)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load archived clients.')
+    } finally {
+      setArchiveLoading(false)
+    }
+  }
+
+  async function handleShowArchive() {
+    setView('archive')
+    await refreshArchivedClients()
+  }
+
+  async function handleArchiveClient(client: AdminClient) {
+    if (!confirm(`Archive "${client.company_name}"? They'll disappear from the active client list, but keep their documents and can still log in. You can unarchive them later.`)) {
+      return
+    }
+    setError(null)
+    setBusy(true)
+    try {
+      await adminApi.archiveClient(password, client.id)
+      if (selectedClientId === client.id) setSelectedClientId('')
+      await refreshClients()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not archive client.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleUnarchiveClient(client: AdminClient) {
+    setError(null)
+    setBusy(true)
+    try {
+      await adminApi.unarchiveClient(password, client.id)
+      await refreshArchivedClients()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not unarchive client.')
     } finally {
       setBusy(false)
     }
@@ -303,6 +367,8 @@ export function Admin() {
     setDocs([])
     setError(null)
     setAuthError(null)
+    setView('clients')
+    setArchivedClients([])
   }
 
   async function handleDelete(doc: AdminDocument) {
@@ -360,6 +426,15 @@ export function Admin() {
         <span className="eyebrow" style={{ margin: 0 }}>
           Admin
         </span>
+        {view === 'clients' ? (
+          <button type="button" className="secondary" onClick={handleShowArchive}>
+            View archived clients
+          </button>
+        ) : (
+          <button type="button" className="secondary" onClick={() => setView('clients')}>
+            Back to active clients
+          </button>
+        )}
         <button type="button" className="secondary" onClick={handleLogout}>
           Log out
         </button>
@@ -368,6 +443,55 @@ export function Admin() {
       <div className="page">
         {error && <p className="error">{error}</p>}
 
+        {view === 'archive' ? (
+          <section className="card">
+            <h2>Archived clients</h2>
+            <p className="muted" style={{ marginTop: 4 }}>
+              Archiving only hides a client from the active list above — their documents and
+              portal login are untouched, and unarchiving brings them right back.
+            </p>
+            {archiveLoading ? (
+              <p className="muted">Loading…</p>
+            ) : archivedClients.length === 0 ? (
+              <p className="muted">No archived clients.</p>
+            ) : (
+              <ul className="doc-list">
+                {archivedClients.map((c) => (
+                  <li key={c.id} className="doc-row">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {c.logo_url && (
+                        <img
+                          src={c.logo_url}
+                          alt=""
+                          style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 4 }}
+                        />
+                      )}
+                      <div>
+                        <div className="doc-title">{c.company_name}</div>
+                        {c.archived_at && (
+                          <span className="muted">
+                            Archived {new Date(c.archived_at).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="doc-row-actions">
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => handleUnarchiveClient(c)}
+                        disabled={busy}
+                      >
+                        Unarchive
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ) : (
+          <>
         <section className="card">
           <h2>Add a client</h2>
           <form onSubmit={handleCreateClient} className="stacked-form">
@@ -380,6 +504,13 @@ export function Admin() {
             <label htmlFor="clientPassword">Temporary password</label>
             <input id="clientPassword" name="clientPassword" type="text" required minLength={8} />
 
+            <label htmlFor="logo">Logo (optional)</label>
+            <input id="logo" name="logo" type="file" accept="image/*" />
+            <p className="muted" style={{ marginTop: 4 }}>
+              Shown next to their name in the client picker below — for staff reference only,
+              never shown to the client.
+            </p>
+
             <button type="submit" disabled={busy}>
               Create client
             </button>
@@ -389,18 +520,40 @@ export function Admin() {
         <section className="card">
           <h2>Documents</h2>
           <label htmlFor="clientSelect">Client</label>
-          <select
-            id="clientSelect"
-            value={selectedClientId}
-            onChange={(e) => setSelectedClientId(e.target.value)}
-          >
-            <option value="">Select a client…</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.company_name}
-              </option>
-            ))}
-          </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <select
+              id="clientSelect"
+              value={selectedClientId}
+              onChange={(e) => setSelectedClientId(e.target.value)}
+            >
+              <option value="">Select a client…</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.company_name}
+                </option>
+              ))}
+            </select>
+            {selectedClientId && clients.find((c) => c.id === selectedClientId)?.logo_url && (
+              <img
+                src={clients.find((c) => c.id === selectedClientId)?.logo_url ?? undefined}
+                alt=""
+                style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 4 }}
+              />
+            )}
+            {selectedClientId && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  const client = clients.find((c) => c.id === selectedClientId)
+                  if (client) handleArchiveClient(client)
+                }}
+                disabled={busy}
+              >
+                Archive this client
+              </button>
+            )}
+          </div>
 
           {selectedClientId && (
             <>
@@ -554,6 +707,8 @@ export function Admin() {
             </>
           )}
         </section>
+          </>
+        )}
       </div>
     </>
   )

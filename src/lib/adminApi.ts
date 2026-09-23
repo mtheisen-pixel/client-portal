@@ -21,6 +21,10 @@ export interface AdminClient {
   id: string
   company_name: string
   created_at: string
+  logo_path: string | null
+  logo_url: string | null
+  /** Only present on the archived-clients list. */
+  archived_at?: string | null
 }
 
 export interface AdminDocument {
@@ -36,7 +40,26 @@ export interface AdminDocument {
 }
 
 export const adminApi = {
+  // Active clients only (archived ones are excluded server-side) — see
+  // listArchivedClients for the archive view.
   listClients: (password: string) => call<{ clients: AdminClient[] }>(password, 'list_clients'),
+
+  listArchivedClients: (password: string) =>
+    call<{ clients: AdminClient[] }>(password, 'list_archived_clients'),
+
+  // Hide-only: the client keeps their documents and can still log in — see
+  // README's "Archiving a client" section. Fully reversible via unarchiveClient.
+  archiveClient: (password: string, clientId: string) =>
+    call<{ ok: true }>(password, 'archive_client', { clientId }),
+
+  unarchiveClient: (password: string, clientId: string) =>
+    call<{ ok: true }>(password, 'unarchive_client', { clientId }),
+
+  // Records where an already-uploaded logo file landed (upload it first via
+  // createUploadUrl + Supabase Storage's uploadToSignedUrl, same two-step
+  // pattern as a document). Pass logoPath: null to clear a client's logo.
+  setClientLogo: (password: string, clientId: string, logoPath: string | null) =>
+    call<{ ok: true }>(password, 'set_client_logo', { clientId, logoPath }),
 
   createClient: (password: string, email: string, clientPassword: string, companyName: string) =>
     call<{ client: AdminClient }>(password, 'create_client', {
