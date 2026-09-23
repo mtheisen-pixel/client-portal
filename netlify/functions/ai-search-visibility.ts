@@ -41,7 +41,20 @@ async function callAuditApp(path: 'preflight' | 'start' | 'status', body: Record
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   })
-  const data = await res.json().catch(() => null)
+  const text = await res.text()
+  let data: unknown = null
+  try {
+    data = JSON.parse(text)
+  } catch {
+    // Not JSON — e.g. a platform error page, or AUDIT_APP_BASE_URL pointing
+    // at a deploy without these routes (its login redirect answers instead).
+    // Say which host answered and what it said, so that's visible at once.
+    data = {
+      error: `Audit app at ${new URL(baseUrl).host} returned HTTP ${res.status} (not JSON): ${text
+        .replace(/\s+/g, ' ')
+        .slice(0, 200)}`,
+    }
+  }
   return { status: res.status, data }
 }
 
