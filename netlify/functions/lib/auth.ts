@@ -2,7 +2,8 @@ import type { HandlerEvent } from '@netlify/functions'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { timingSafeEqual } from 'node:crypto'
 
-// Shared by every admin-only Netlify function (admin.ts, website-audit.ts).
+// Shared by every admin-only Netlify function (admin.ts, website-audit.ts,
+// ai-search-visibility.ts).
 // Extracted so the password check and IP lockout bookkeeping can't drift
 // between them — this is the only gate standing between the public internet
 // and the service_role key, so it lives in exactly one place.
