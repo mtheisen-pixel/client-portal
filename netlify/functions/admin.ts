@@ -68,7 +68,7 @@ export const handler: Handler = async (event) => {
       case 'list_clients': {
         const { data, error } = await supabaseAdmin
           .from('portal_clients')
-          .select('id, company_name, created_at, logo_path')
+          .select('id, company_name, created_at, logo_path, category, site_url')
           .is('archived_at', null)
           .order('company_name')
         if (error) throw error
@@ -78,11 +78,110 @@ export const handler: Handler = async (event) => {
       case 'list_archived_clients': {
         const { data, error } = await supabaseAdmin
           .from('portal_clients')
-          .select('id, company_name, created_at, logo_path, archived_at')
+          .select('id, company_name, created_at, logo_path, archived_at, category, site_url')
           .not('archived_at', 'is', null)
           .order('archived_at', { ascending: false })
         if (error) throw error
         return json(200, { clients: await withLogoUrls(data ?? []) })
+      }
+
+      // Updates category/site_url on an existing client — the only other
+      // place these get set is create_client, so this is what lets a
+      // client created before these fields existed (or one where they
+      // just weren't known yet) get them filled in later.
+      case 'update_client_details': {
+        const { clientId, category, siteUrl } = body as {
+          clientId?: string
+          category?: string | null
+          siteUrl?: string | null
+        }
+        if (!clientId) return json(400, { error: 'clientId is required.' })
+
+        const { error } = await supabaseAdmin
+          .from('portal_clients')
+          .update({ category: category || null, site_url: siteUrl || null })
+          .eq('id', clientId)
+        if (error) throw error
+        return json(200, { ok: true })
+      }
+
+      // Lists the people who can log in for a client. auth.users isn't
+      // exposed via PostgREST (not even to the service-role key), so each
+      // row's email comes from a separate Admin Auth API call rather than
+      // a join — fine at this scale, same "N+1 is acceptable here" posture
+      // this codebase already takes elsewhere.
+      case 'list_contacts': {
+        const { clientId } = body as { clientId?: string }
+        if (!clientId) return json(400, { error: 'clientId is required.' })
+
+        const { data, error } = await supabaseAdmin
+          .from('client_users')
+          .select('id, user_id, name, role, created_at')
+          .eq('client_id', clientId)
+          .order('created_at')
+        if (error) throw error
+
+        const contacts = await Promise.all(
+          (data ?? []).map(async (row) => {
+            const { data: userData } = await supabaseAdmin.auth.admin.getUserById(row.user_id)
+            return { ...row, email: userData.user?.email ?? null }
+          }),
+        )
+        return json(200, { contacts })
+      }
+
+      // Adds an additional person who can log in for an EXISTING client.
+      // Same two-piece shape as create_client's own user+row creation, just
+      // without also creating the company row. If the client_users insert
+      // fails (most likely: this email is already a contact somewhere
+      // else, tripping the unique(user_id) constraint), the just-created
+      // auth user is cleaned up rather than left as an orphaned account.
+      case 'add_contact': {
+        // contactPassword, not password -- call()'s wrapper always overwrites
+        // a payload's own `password` field with the admin gate password (see
+        // its doc comment), same reason create_client uses clientPassword.
+        const { clientId, email, contactPassword, name, role } = body as {
+          clientId?: string
+          email?: string
+          contactPassword?: string
+          name?: string
+          role?: string
+        }
+        if (!clientId || !email || !contactPassword) {
+          return json(400, { error: 'clientId, email, and contactPassword are required.' })
+        }
+
+        const { data: userData, error: userError } = await supabaseAdmin.auth.admin.createUser({
+          email,
+          password: contactPassword,
+          email_confirm: true,
+        })
+        if (userError) throw userError
+
+        const { error: linkError } = await supabaseAdmin
+          .from('client_users')
+          .insert({ client_id: clientId, user_id: userData.user.id, name: name || null, role: role || null })
+        if (linkError) {
+          await supabaseAdmin.auth.admin.deleteUser(userData.user.id).catch(() => {
+            // Best-effort — nothing left to do if cleanup itself fails.
+          })
+          throw linkError
+        }
+
+        return json(200, { ok: true })
+      }
+
+      // Revokes one person's access to a client — deletes only their
+      // client_users membership row, never their underlying auth account
+      // (they simply stop being anyone's contact; their login just no
+      // longer resolves to a client under RLS).
+      case 'remove_contact': {
+        const { contactId } = body as { contactId?: string }
+        if (!contactId) return json(400, { error: 'contactId is required.' })
+
+        const { error } = await supabaseAdmin.from('client_users').delete().eq('id', contactId)
+        if (error) throw error
+        return json(200, { ok: true })
       }
 
       case 'archive_client': {
@@ -128,10 +227,14 @@ export const handler: Handler = async (event) => {
       }
 
       case 'create_client': {
-        const { email, clientPassword, companyName } = body as {
+        const { email, clientPassword, companyName, contactName, contactRole, category, siteUrl } = body as {
           email?: string
           clientPassword?: string
           companyName?: string
+          contactName?: string
+          contactRole?: string
+          category?: string | null
+          siteUrl?: string | null
         }
         if (!email || !clientPassword || !companyName) {
           return json(400, { error: 'email, clientPassword, and companyName are required.' })
@@ -146,8 +249,23 @@ export const handler: Handler = async (event) => {
 
         const { error: clientError } = await supabaseAdmin
           .from('portal_clients')
-          .insert({ id: userData.user.id, company_name: companyName })
+          .insert({
+            id: userData.user.id,
+            company_name: companyName,
+            category: category || null,
+            site_url: siteUrl || null,
+          })
         if (clientError) throw clientError
+
+        const { error: contactError } = await supabaseAdmin
+          .from('client_users')
+          .insert({
+            client_id: userData.user.id,
+            user_id: userData.user.id,
+            name: contactName || null,
+            role: contactRole || 'Primary Contact',
+          })
+        if (contactError) throw contactError
 
         return json(200, { client: { id: userData.user.id, company_name: companyName } })
       }
