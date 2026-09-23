@@ -49,7 +49,11 @@ export function describeAnthropicFailure(err: unknown, checkLabel: string): stri
   return `${checkLabel} unavailable — ${message}`;
 }
 
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
+// Both calls below pass `thinking: { type: "disabled" }`: Claude Sonnet 5 runs
+// adaptive thinking when it's omitted, which would add latency inside the
+// synchronous website-audit function. max_tokens is ~30% above the old
+// Sonnet 4.5 values to allow for Sonnet 5's tokenizer.
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 
 export interface ToneDescriptor {
   descriptor: string;
@@ -118,7 +122,8 @@ Generate the tone descriptors now.`;
 
   const message = await client.messages.create({
     model: ANTHROPIC_MODEL,
-    max_tokens: 1024,
+    thinking: { type: "disabled" },
+    max_tokens: 1408,
     system: TONE_SYSTEM_PROMPT,
     messages: [{ role: "user", content: userPrompt }],
     tools: [TONE_TOOL],
@@ -155,7 +160,8 @@ export async function analyzeGeoReadability(pagesText: string): Promise<string> 
   const client = anthropicClient();
   const message = await client.messages.create({
     model: ANTHROPIC_MODEL,
-    max_tokens: 300,
+    thinking: { type: "disabled" },
+    max_tokens: 400,
     system: GEO_SYSTEM_PROMPT,
     messages: [{ role: "user", content: `Extracted page copy:\n${pagesText.slice(0, 15000)}\n\nAssess AI-summarizability now.` }],
   });
