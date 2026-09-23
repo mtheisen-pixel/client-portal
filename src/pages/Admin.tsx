@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { adminApi } from '../lib/adminApi'
-import type { AdminClient, AdminDocument } from '../lib/adminApi'
+import type { AdminClient, AdminContact, AdminDocument } from '../lib/adminApi'
 import { Logo } from '../components/Logo'
 import { SiteHeader } from '../components/SiteHeader'
-import { DOCUMENT_CATEGORIES } from '../lib/categories'
+import { DOCUMENT_CATEGORIES, CLIENT_CATEGORIES } from '../lib/categories'
 
 // Mirrors the title format website-audit-performance-background.ts computes
 // server-side — kept in sync manually (small, stable string formatting;
@@ -95,6 +95,11 @@ export function Admin() {
   const [auditReviewUrl, setAuditReviewUrl] = useState<string | null>(null)
   const [selectedAuditType, setSelectedAuditType] = useState<'creative' | 'technical'>('creative')
 
+  const [contacts, setContacts] = useState<AdminContact[]>([])
+  const [contactsBusy, setContactsBusy] = useState(false)
+  const [detailsCategory, setDetailsCategory] = useState('')
+  const [detailsSiteUrl, setDetailsSiteUrl] = useState('')
+
   async function tryUnlock(candidate: string) {
     setAuthError(null)
     setCheckingPassword(true)
@@ -124,8 +129,22 @@ export function Admin() {
     setDocs(documents)
   }
 
+  async function refreshContacts(clientId: string) {
+    if (!clientId) {
+      setContacts([])
+      return
+    }
+    const { contacts } = await adminApi.listContacts(password, clientId)
+    setContacts(contacts)
+  }
+
   useEffect(() => {
     if (unlocked) refreshDocs(selectedClientId).catch((err) => setError(err.message))
+    if (unlocked) refreshContacts(selectedClientId).catch((err) => setError(err.message))
+
+    const client = clients.find((c) => c.id === selectedClientId)
+    setDetailsCategory(client?.category ?? '')
+    setDetailsSiteUrl(client?.site_url ?? '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClientId, unlocked])
 
@@ -146,6 +165,12 @@ export function Admin() {
         String(fd.get('email')),
         String(fd.get('clientPassword')),
         String(fd.get('companyName')),
+        {
+          contactName: String(fd.get('contactName') ?? '').trim() || undefined,
+          contactRole: String(fd.get('contactRole') ?? '').trim() || undefined,
+          category: String(fd.get('category') ?? '').trim() || undefined,
+          siteUrl: String(fd.get('siteUrl') ?? '').trim() || undefined,
+        },
       )
 
       // Logo is optional and uploaded as a second step, same shape as a
@@ -214,6 +239,62 @@ export function Admin() {
       setError(err instanceof Error ? err.message : 'Could not unarchive client.')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function handleUpdateClientDetails(e: FormEvent) {
+    e.preventDefault()
+    if (!selectedClientId) return
+    setError(null)
+    setBusy(true)
+    try {
+      await adminApi.updateClientDetails(password, selectedClientId, detailsCategory || null, detailsSiteUrl || null)
+      await refreshClients()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update client details.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleAddContact(e: FormEvent) {
+    const form = e.currentTarget as HTMLFormElement
+    e.preventDefault()
+    if (!selectedClientId) return
+    setError(null)
+    setContactsBusy(true)
+    try {
+      const fd = new FormData(form)
+      await adminApi.addContact(
+        password,
+        selectedClientId,
+        String(fd.get('email')),
+        String(fd.get('contactPassword')),
+        String(fd.get('name') ?? '').trim() || undefined,
+        String(fd.get('role') ?? '').trim() || undefined,
+      )
+      form.reset()
+      await refreshContacts(selectedClientId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add contact.')
+    } finally {
+      setContactsBusy(false)
+    }
+  }
+
+  async function handleRemoveContact(contact: AdminContact) {
+    if (!confirm(`Remove ${contact.name || contact.email || 'this contact'}? They'll no longer be able to log in for this client.`)) {
+      return
+    }
+    setError(null)
+    setContactsBusy(true)
+    try {
+      await adminApi.removeContact(password, contact.id)
+      await refreshContacts(selectedClientId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove contact.')
+    } finally {
+      setContactsBusy(false)
     }
   }
 
@@ -369,6 +450,9 @@ export function Admin() {
     setAuthError(null)
     setView('clients')
     setArchivedClients([])
+    setContacts([])
+    setDetailsCategory('')
+    setDetailsSiteUrl('')
   }
 
   async function handleDelete(doc: AdminDocument) {
@@ -498,11 +582,30 @@ export function Admin() {
             <label htmlFor="companyName">Company name</label>
             <input id="companyName" name="companyName" required />
 
+            <label htmlFor="contactName">Primary contact name</label>
+            <input id="contactName" name="contactName" />
+
+            <label htmlFor="contactRole">Role / title</label>
+            <input id="contactRole" name="contactRole" placeholder="e.g. Marketing Director" />
+
             <label htmlFor="email">Login email</label>
             <input id="email" name="email" type="email" required />
 
             <label htmlFor="clientPassword">Temporary password</label>
             <input id="clientPassword" name="clientPassword" type="text" required minLength={8} />
+
+            <label htmlFor="newClientCategory">Category</label>
+            <select id="newClientCategory" name="category" defaultValue="">
+              <option value="">Not set</option>
+              {CLIENT_CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+
+            <label htmlFor="siteUrl">Site URL</label>
+            <input id="siteUrl" name="siteUrl" type="url" placeholder="https://example.com" />
 
             <label htmlFor="logo">Logo (optional)</label>
             <input id="logo" name="logo" type="file" accept="image/*" />
@@ -557,6 +660,82 @@ export function Admin() {
 
           {selectedClientId && (
             <>
+              <h3>Client details</h3>
+              <form onSubmit={handleUpdateClientDetails} className="stacked-form">
+                <label htmlFor="detailsCategory">Category</label>
+                <select
+                  id="detailsCategory"
+                  value={detailsCategory}
+                  onChange={(e) => setDetailsCategory(e.target.value)}
+                >
+                  <option value="">Not set</option>
+                  {CLIENT_CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+
+                <label htmlFor="detailsSiteUrl">Site URL</label>
+                <input
+                  id="detailsSiteUrl"
+                  type="url"
+                  placeholder="https://example.com"
+                  value={detailsSiteUrl}
+                  onChange={(e) => setDetailsSiteUrl(e.target.value)}
+                />
+
+                <button type="submit" disabled={busy}>
+                  Save client details
+                </button>
+              </form>
+
+              <h3>Contacts</h3>
+              <ul className="doc-list">
+                {contacts.map((contact) => (
+                  <li key={contact.id} className="doc-row">
+                    <div>
+                      <div className="doc-title">{contact.name || contact.email}</div>
+                      <span className="muted">
+                        {contact.email}
+                        {contact.role ? ` — ${contact.role}` : ''}
+                      </span>
+                    </div>
+                    <div className="doc-row-actions">
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => handleRemoveContact(contact)}
+                        disabled={contactsBusy}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </li>
+                ))}
+                {contacts.length === 0 && <p className="muted">No contacts yet.</p>}
+              </ul>
+
+              <h3>Add a contact</h3>
+              <form onSubmit={handleAddContact} className="stacked-form">
+                <label htmlFor="contactEmail">Login email</label>
+                <input id="contactEmail" name="email" type="email" required />
+
+                <label htmlFor="contactTempPassword">Temporary password</label>
+                <input id="contactTempPassword" name="contactPassword" type="text" required minLength={8} />
+
+                <label htmlFor="contactPersonName">Name</label>
+                <input id="contactPersonName" name="name" />
+
+                <label htmlFor="contactPersonRole">Role / title</label>
+                <input id="contactPersonRole" name="role" placeholder="e.g. Marketing Director" />
+
+                <button type="submit" disabled={contactsBusy}>
+                  {contactsBusy ? 'Adding…' : 'Add contact'}
+                </button>
+              </form>
+
+              <h3>Documents</h3>
               <ul className="doc-list">
                 {docs.map((doc) => (
                   <li key={doc.id} className="doc-row">

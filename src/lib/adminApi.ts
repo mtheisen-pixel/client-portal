@@ -23,8 +23,19 @@ export interface AdminClient {
   created_at: string
   logo_path: string | null
   logo_url: string | null
+  category: string | null
+  site_url: string | null
   /** Only present on the archived-clients list. */
   archived_at?: string | null
+}
+
+export interface AdminContact {
+  id: string
+  user_id: string
+  name: string | null
+  role: string | null
+  email: string | null
+  created_at: string
 }
 
 export interface AdminDocument {
@@ -61,12 +72,52 @@ export const adminApi = {
   setClientLogo: (password: string, clientId: string, logoPath: string | null) =>
     call<{ ok: true }>(password, 'set_client_logo', { clientId, logoPath }),
 
-  createClient: (password: string, email: string, clientPassword: string, companyName: string) =>
+  createClient: (
+    password: string,
+    email: string,
+    clientPassword: string,
+    companyName: string,
+    args: {
+      contactName?: string
+      contactRole?: string
+      category?: string
+      siteUrl?: string
+    } = {},
+  ) =>
     call<{ client: AdminClient }>(password, 'create_client', {
       email,
       clientPassword,
       companyName,
+      ...args,
     }),
+
+  // See admin.ts's update_client_details — the only other place category/
+  // site_url are set is createClient, so this is what lets a client created
+  // before these fields existed get them filled in after the fact.
+  updateClientDetails: (password: string, clientId: string, category: string | null, siteUrl: string | null) =>
+    call<{ ok: true }>(password, 'update_client_details', { clientId, category, siteUrl }),
+
+  listContacts: (password: string, clientId: string) =>
+    call<{ contacts: AdminContact[] }>(password, 'list_contacts', { clientId }),
+
+  addContact: (
+    password: string,
+    clientId: string,
+    email: string,
+    contactPassword: string,
+    name?: string,
+    role?: string,
+  ) =>
+    call<{ ok: true }>(password, 'add_contact', {
+      clientId,
+      email,
+      contactPassword,
+      name,
+      role,
+    }),
+
+  removeContact: (password: string, contactId: string) =>
+    call<{ ok: true }>(password, 'remove_contact', { contactId }),
 
   listDocuments: (password: string, clientId: string) =>
     call<{ documents: AdminDocument[] }>(password, 'list_documents', { clientId }),

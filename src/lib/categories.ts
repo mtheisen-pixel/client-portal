@@ -32,3 +32,18 @@ export const CATEGORY_SECTION_ORDER = [
   'Contract',
   'Other',
 ] as const
+
+// Must match the CHECK constraint on public.portal_clients.category exactly
+// (see supabase/migrations), which in turn matches the Audit app's own
+// clients.category enum verbatim (0011_client_category.sql there) — this is
+// the value passed through the seo_studio handoff's category field, so a
+// mismatch here would silently drift the two apps' taxonomies for the same
+// concept. Hardcoded once rather than imported cross-repo.
+export const CLIENT_CATEGORIES = [
+  { value: 'general_business', label: 'General business' },
+  { value: 'specialty_medical_dental', label: 'Specialty medical / dental' },
+  { value: 'legal', label: 'Legal' },
+  { value: 'b2b_professional_services', label: 'B2B professional services' },
+  { value: 'ecommerce_retail', label: 'Ecommerce / retail' },
+  { value: 'other', label: 'Other' },
+] as const
