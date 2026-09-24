@@ -285,17 +285,38 @@ button:disabled {
 
 .checkbox-field {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 10px;
+  line-height: 1.45;
   margin-top: 14px;
   font-size: 0.9rem;
   font-weight: 500;
   color: var(--body);
 }
 
+/* Checkboxes and radios opt out of the text-input box styles above (padding,
+   border, focus halo), never shrink when their label wraps, and sit centred on
+   the label's first line, so every option's text starts at the same point. */
 .checkbox-field input[type='checkbox'],
 .checkbox-field input[type='radio'] {
+  flex: 0 0 16px;
   width: 16px;
   height: 16px;
+  margin: calc((1.45em - 16px) / 2) 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
   accent-color: var(--teal);
+}
+
+.checkbox-field input[type='checkbox']:focus,
+.checkbox-field input[type='radio']:focus {
+  box-shadow: none;
+}
+
+.checkbox-field input[type='checkbox']:focus-visible,
+.checkbox-field input[type='radio']:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
 }
