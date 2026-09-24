@@ -2,7 +2,13 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { adminApi } from '../lib/adminApi'
-import type { AdminClient, AdminContact, AdminDocument } from '../lib/adminApi'
+import type {
+  AdminClient,
+  AdminContact,
+  AdminDocument,
+  AiSearchVisibilityPreflight,
+  AiSearchVisibilityStatus,
+} from '../lib/adminApi'
 import { Logo } from '../components/Logo'
 import { SiteHeader } from '../components/SiteHeader'
 import { DOCUMENT_CATEGORIES, CLIENT_CATEGORIES } from '../lib/categories'
@@ -93,7 +99,12 @@ export function Admin() {
   const [auditBusy, setAuditBusy] = useState(false)
   const [auditStatus, setAuditStatus] = useState<string | null>(null)
   const [auditReviewUrl, setAuditReviewUrl] = useState<string | null>(null)
-  const [selectedAuditType, setSelectedAuditType] = useState<'creative' | 'technical'>('creative')
+  const [selectedAuditType, setSelectedAuditType] = useState<'creative' | 'technical' | 'ai_visibility'>('creative')
+  // AI Search Visibility Audit: preflight (readiness + cost) → confirm → start → poll.
+  const [aiTier, setAiTier] = useState<'light' | 'comprehensive'>('light')
+  const [aiPreflight, setAiPreflight] = useState<AiSearchVisibilityPreflight | null>(null)
+  const [aiBatchId, setAiBatchId] = useState<string | null>(null)
+  const [aiBatch, setAiBatch] = useState<AiSearchVisibilityStatus | null>(null)
 
   const [contacts, setContacts] = useState<AdminContact[]>([])
   const [contactsBusy, setContactsBusy] = useState(false)
@@ -145,8 +156,67 @@ export function Admin() {
     const client = clients.find((c) => c.id === selectedClientId)
     setDetailsCategory(client?.category ?? '')
     setDetailsSiteUrl(client?.site_url ?? '')
+    setAiPreflight(null)
+    setAiBatchId(null)
+    setAiBatch(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClientId, unlocked])
+
+  // Polls an AI Search Visibility batch until it finishes. The run itself is
+  // a GitHub Actions job in the Audit app and keeps going if this page is
+  // closed — this is only the progress view.
+  useEffect(() => {
+    if (!aiBatchId || !selectedClientId || !password) return
+    let cancelled = false
+    const clientId = selectedClientId
+    async function tick() {
+      try {
+        const status = await adminApi.aiSearchVisibilityStatus(password, clientId, aiBatchId as string)
+        if (cancelled) return
+        setAiBatch(status)
+        if (status.status === 'queued' || status.status === 'running') {
+          timer = window.setTimeout(tick, 10000)
+        } else if (status.reviewUrl) {
+          await refreshDocs(clientId).catch(() => {})
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not check AI Search Visibility progress.')
+      }
+    }
+    let timer = window.setTimeout(tick, 0)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiBatchId, selectedClientId, password])
+
+  const aiRunActive = Boolean(aiBatchId) && (!aiBatch || aiBatch.status === 'queued' || aiBatch.status === 'running')
+
+  async function handleAiVisibilityPreflight() {
+    setAiPreflight(null)
+    setAiBatch(null)
+    setAiBatchId(null)
+    setAuditStatus('Checking this client is ready and estimating cost…')
+    const result = await adminApi.aiSearchVisibilityPreflight(password, selectedClientId, aiTier)
+    setAuditStatus(null)
+    setAiPreflight(result)
+  }
+
+  async function handleAiVisibilityConfirm() {
+    if (!selectedClientId) return
+    setError(null)
+    setAuditBusy(true)
+    try {
+      const { batchId } = await adminApi.startAiSearchVisibility(password, selectedClientId, aiTier)
+      setAiPreflight(null)
+      setAiBatchId(batchId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start the AI Search Visibility Audit.')
+    } finally {
+      setAuditBusy(false)
+    }
+  }
 
   async function handlePasswordSubmit(e: FormEvent) {
     e.preventDefault()
@@ -347,6 +417,12 @@ export function Admin() {
 
     try {
       const fd = new FormData(form)
+      if (String(fd.get('auditType') ?? '') === 'ai_visibility') {
+        // No crawl and nothing runs yet — this only checks readiness and
+        // shows the cost estimate; the run starts from the confirm button.
+        await handleAiVisibilityPreflight()
+        return
+      }
       const url = String(fd.get('websiteUrl') ?? '').trim()
       if (!url) throw new Error('Enter a URL to audit.')
       const competitorName = String(fd.get('competitorName') ?? '').trim()
@@ -814,21 +890,25 @@ export function Admin() {
                 to audit a named competitor&apos;s site instead — run it once per competitor.
               </p>
               <form onSubmit={handleRunWebsiteAudit} className="stacked-form">
-                <label htmlFor="websiteUrl">Website URL</label>
-                <input
-                  id="websiteUrl"
-                  name="websiteUrl"
-                  type="url"
-                  placeholder="https://example.com"
-                  required
-                />
+                {selectedAuditType !== 'ai_visibility' && (
+                  <>
+                    <label htmlFor="websiteUrl">Website URL</label>
+                    <input
+                      id="websiteUrl"
+                      name="websiteUrl"
+                      type="url"
+                      placeholder="https://example.com"
+                      required
+                    />
 
-                <label htmlFor="competitorName">Competitor name (optional)</label>
-                <input
-                  id="competitorName"
-                  name="competitorName"
-                  placeholder="Leave blank for the client's own site — or name a competitor, e.g. Parachute"
-                />
+                    <label htmlFor="competitorName">Competitor name (optional)</label>
+                    <input
+                      id="competitorName"
+                      name="competitorName"
+                      placeholder="Leave blank for the client's own site — or name a competitor, e.g. Parachute"
+                    />
+                  </>
+                )}
 
                 <label>Audit type</label>
                 <label className="checkbox-field">
@@ -851,6 +931,20 @@ export function Admin() {
                   />
                   SEO Audit — SEO/technical health, structured data, Core Web Vitals
                 </label>
+                <label className="checkbox-field">
+                  <input
+                    type="radio"
+                    name="auditType"
+                    value="ai_visibility"
+                    checked={selectedAuditType === 'ai_visibility'}
+                    onChange={() => {
+                      setSelectedAuditType('ai_visibility')
+                      setAiPreflight(null)
+                    }}
+                  />
+                  AI Search Visibility Audit — asks ChatGPT, Claude, Gemini and Perplexity the client&apos;s
+                  prompts and measures whether they name the client
+                </label>
 
                 {selectedAuditType === 'technical' && (
                   <>
@@ -871,10 +965,125 @@ export function Admin() {
                   </>
                 )}
 
-                <button type="submit" disabled={auditBusy}>
-                  {auditBusy ? 'Running audit…' : 'Run Website Audit'}
+                {selectedAuditType === 'ai_visibility' && (
+                  <>
+                    <label>AI Search Visibility tier</label>
+                    <label className="checkbox-field">
+                      <input
+                        type="radio"
+                        name="aiTier"
+                        value="light"
+                        checked={aiTier === 'light'}
+                        onChange={() => {
+                          setAiTier('light')
+                          setAiPreflight(null)
+                        }}
+                      />
+                      Light — up to 10 prompts mixed across query types, web search on; a visibility
+                      summary per platform
+                    </label>
+                    <label className="checkbox-field">
+                      <input
+                        type="radio"
+                        name="aiTier"
+                        value="comprehensive"
+                        checked={aiTier === 'comprehensive'}
+                        onChange={() => {
+                          setAiTier('comprehensive')
+                          setAiPreflight(null)
+                        }}
+                      />
+                      Comprehensive — the full prompt set, web search on and off; adds share of voice,
+                      the sources AI assistants cite, and change since the previous Comprehensive run
+                    </label>
+                    <p className="muted" style={{ marginTop: 4 }}>
+                      Uses the client&apos;s active AI visibility prompt set in the Audit app. Nothing runs
+                      until you confirm the estimated cost on the next step. When it finishes, a draft
+                      review report appears in the Audit app.
+                    </p>
+                  </>
+                )}
+
+                <button type="submit" disabled={auditBusy || (selectedAuditType === 'ai_visibility' && aiRunActive)}>
+                  {auditBusy
+                    ? 'Running audit…'
+                    : selectedAuditType === 'ai_visibility'
+                      ? 'Check readiness & cost'
+                      : 'Run Website Audit'}
                 </button>
               </form>
+              {selectedAuditType === 'ai_visibility' && aiPreflight && !aiPreflight.ready && (
+                <div className="muted" style={{ marginTop: 8 }}>
+                  <p>{aiPreflight.message}</p>
+                  {aiPreflight.setupUrl && (
+                    <p>
+                      <a href={aiPreflight.setupUrl} target="_blank" rel="noreferrer">
+                        Set this up in the Audit app ↗
+                      </a>
+                    </p>
+                  )}
+                  {aiPreflight.reason === 'already_running' && aiPreflight.activeBatchId && aiPreflight.activeBatchIsSearchVisibility && (
+                    <button type="button" onClick={() => setAiBatchId(aiPreflight.activeBatchId ?? null)}>
+                      Track the running batch
+                    </button>
+                  )}
+                </div>
+              )}
+              {selectedAuditType === 'ai_visibility' && aiPreflight?.ready && aiPreflight.estimate && (
+                <div style={{ marginTop: 8 }}>
+                  <p>
+                    <strong>Confirm AI Search Visibility Audit ({aiTier === 'comprehensive' ? 'Comprehensive' : 'Light'})</strong>
+                    {aiPreflight.clientName ? ` for ${aiPreflight.clientName}` : ''}
+                  </p>
+                  <ul className="muted">
+                    <li>
+                      {aiPreflight.estimate.promptCount} prompt(s) × {aiPreflight.estimate.platforms.join(', ')} ={' '}
+                      {aiPreflight.estimate.plannedCalls} paid AI platform calls
+                    </li>
+                    <li>
+                      Estimated cost: roughly ${aiPreflight.estimate.lowUsd.toFixed(2)}–$
+                      {aiPreflight.estimate.highUsd.toFixed(2)} (rough estimate, not a quote — includes
+                      classifying the answers and drafting the report)
+                    </li>
+                    <li>Runs in the background (typically 10–60 minutes). You can leave this page.</li>
+                  </ul>
+                  <button type="button" onClick={handleAiVisibilityConfirm} disabled={auditBusy}>
+                    {auditBusy ? 'Starting…' : 'Confirm & run'}
+                  </button>{' '}
+                  <button type="button" onClick={() => setAiPreflight(null)} disabled={auditBusy}>
+                    Cancel
+                  </button>
+                </div>
+              )}
+              {selectedAuditType === 'ai_visibility' && aiBatchId && (
+                <div className="muted" style={{ marginTop: 8 }}>
+                  {!aiBatch && <p>Starting…</p>}
+                  {aiBatch?.status === 'queued' && <p>Queued — waiting for the job to start…</p>}
+                  {aiBatch?.status === 'running' && (
+                    <p>
+                      Running — {aiBatch.doneCalls} of {aiBatch.plannedCalls} platform calls done
+                      {aiBatch.errorCount > 0 ? ` (${aiBatch.errorCount} errored)` : ''}. Classifying answers and
+                      drafting the report follow.
+                    </p>
+                  )}
+                  {(aiBatch?.status === 'completed' || aiBatch?.status === 'completed-with-errors') && (
+                    <p>
+                      Done — {aiBatch.doneCalls} of {aiBatch.plannedCalls} calls
+                      {aiBatch.status === 'completed-with-errors' ? ` (${aiBatch.errorCount} errored)` : ''}, about $
+                      {aiBatch.estimatedCostUsd.toFixed(2)} in platform and classification calls. A draft review
+                      report is ready.
+                    </p>
+                  )}
+                  {aiBatch?.status === 'failed' && <p>Failed: {aiBatch.error ?? 'unknown error'}</p>}
+                  {aiBatch?.reviewUrl && (
+                    <p>
+                      <a href={aiBatch.reviewUrl} target="_blank" rel="noreferrer">
+                        Review &amp; finalize this AI Search Visibility Audit in the Audit app ↗
+                      </a>
+                    </p>
+                  )}
+                </div>
+              )}
               {auditStatus && <p className="muted">{auditStatus}</p>}
               {auditReviewUrl && (
                 <p>

@@ -1,6 +1,7 @@
 const ENDPOINT = '/.netlify/functions/admin'
 const WEBSITE_AUDIT_ENDPOINT = '/.netlify/functions/website-audit'
 const PERFORMANCE_CHECK_BACKGROUND_ENDPOINT = '/.netlify/functions/website-audit-performance-background'
+const AI_SEARCH_VISIBILITY_ENDPOINT = '/.netlify/functions/ai-search-visibility'
 
 async function call<T>(password: string, action: string, payload: Record<string, unknown> = {}) {
   // password/action are spread last so a payload field can never shadow them
@@ -48,6 +49,52 @@ export interface AdminDocument {
   sort_order: number
   created_at: string
   admin_only: boolean
+}
+
+export interface AiSearchVisibilityEstimate {
+  promptCount: number
+  platforms: string[]
+  plannedCalls: number
+  lowUsd: number
+  highUsd: number
+}
+
+/** Readiness check before an AI Search Visibility Audit run — see the Audit app's src/lib/ai-search-visibility/server.ts. */
+export interface AiSearchVisibilityPreflight {
+  ready: boolean
+  reason?: 'not_linked' | 'no_prompt_set' | 'already_running'
+  message?: string
+  setupUrl?: string
+  clientName?: string
+  activeBatchId?: string
+  /** false when the running batch belongs to the legacy AI Visibility tool (nothing to track here). */
+  activeBatchIsSearchVisibility?: boolean
+  estimate?: AiSearchVisibilityEstimate
+}
+
+export interface AiSearchVisibilityStatus {
+  batchId: string
+  status: 'queued' | 'running' | 'completed' | 'completed-with-errors' | 'failed'
+  plannedCalls: number
+  doneCalls: number
+  errorCount: number
+  estimatedCostUsd: number
+  startedAt: string
+  completedAt: string | null
+  error: string | null
+  reportId: string | null
+  reviewUrl: string | null
+}
+
+async function callAiSearchVisibility<T>(password: string, payload: Record<string, unknown>): Promise<T> {
+  const res = await fetch(AI_SEARCH_VISIBILITY_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...payload, password }),
+  })
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`)
+  return data as T
 }
 
 export const adminApi = {
@@ -179,6 +226,19 @@ export const adminApi = {
       handoffError?: string
     }
   },
+
+  aiSearchVisibilityPreflight: (password: string, clientId: string, tier: 'light' | 'comprehensive') =>
+    callAiSearchVisibility<AiSearchVisibilityPreflight>(password, { action: 'preflight', clientId, tier }),
+
+  startAiSearchVisibility: (password: string, clientId: string, tier: 'light' | 'comprehensive') =>
+    callAiSearchVisibility<{ batchId: string; estimate: AiSearchVisibilityEstimate }>(password, {
+      action: 'start',
+      clientId,
+      tier,
+    }),
+
+  aiSearchVisibilityStatus: (password: string, clientId: string, batchId: string) =>
+    callAiSearchVisibility<AiSearchVisibilityStatus>(password, { action: 'status', clientId, batchId }),
 
   // Fire-and-forget: this hits a Netlify Background Function, which returns
   // a 202 immediately and keeps running for up to 15 minutes — there is no
