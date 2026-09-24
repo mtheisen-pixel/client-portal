@@ -227,8 +227,8 @@ export const adminApi = {
     }
   },
 
-  aiSearchVisibilityPreflight: (password: string, clientId: string) =>
-    callAiSearchVisibility<AiSearchVisibilityPreflight>(password, { action: 'preflight', clientId }),
+  aiSearchVisibilityPreflight: (password: string, clientId: string, tier: 'light' | 'comprehensive') =>
+    callAiSearchVisibility<AiSearchVisibilityPreflight>(password, { action: 'preflight', clientId, tier }),
 
   startAiSearchVisibility: (password: string, clientId: string, tier: 'light' | 'comprehensive') =>
     callAiSearchVisibility<{ batchId: string; estimate: AiSearchVisibilityEstimate }>(password, {

@@ -84,7 +84,10 @@ export const handler: Handler = async (event) => {
   try {
     let result: { status: number; data: unknown }
     if (action === 'preflight') {
-      result = await callAuditApp('preflight', { portal_client_id: clientId })
+      // The estimate depends on the tier (Light runs a capped, search-on-only
+      // subset). Older callers without a tier get Comprehensive, the larger one.
+      const preflightTier = tier === 'light' ? 'light' : 'comprehensive'
+      result = await callAuditApp('preflight', { portal_client_id: clientId, tier: preflightTier })
     } else if (action === 'start') {
       if (tier !== 'light' && tier !== 'comprehensive') return json(400, { error: "tier must be 'light' or 'comprehensive'." })
       result = await callAuditApp('start', { portal_client_id: clientId, tier, requested_by: 'client-portal Admin' })

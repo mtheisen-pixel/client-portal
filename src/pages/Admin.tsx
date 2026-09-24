@@ -198,7 +198,7 @@ export function Admin() {
     setAiBatch(null)
     setAiBatchId(null)
     setAuditStatus('Checking this client is ready and estimating cost…')
-    const result = await adminApi.aiSearchVisibilityPreflight(password, selectedClientId)
+    const result = await adminApi.aiSearchVisibilityPreflight(password, selectedClientId, aiTier)
     setAuditStatus(null)
     setAiPreflight(result)
   }
@@ -974,9 +974,13 @@ export function Admin() {
                         name="aiTier"
                         value="light"
                         checked={aiTier === 'light'}
-                        onChange={() => setAiTier('light')}
+                        onChange={() => {
+                          setAiTier('light')
+                          setAiPreflight(null)
+                        }}
                       />
-                      Light
+                      Light — up to 10 prompts mixed across query types, web search on; a visibility
+                      summary per platform
                     </label>
                     <label className="checkbox-field">
                       <input
@@ -984,9 +988,13 @@ export function Admin() {
                         name="aiTier"
                         value="comprehensive"
                         checked={aiTier === 'comprehensive'}
-                        onChange={() => setAiTier('comprehensive')}
+                        onChange={() => {
+                          setAiTier('comprehensive')
+                          setAiPreflight(null)
+                        }}
                       />
-                      Comprehensive
+                      Comprehensive — the full prompt set, web search on and off; adds share of voice,
+                      the sources AI assistants cite, and change since the previous Comprehensive run
                     </label>
                     <p className="muted" style={{ marginTop: 4 }}>
                       Uses the client&apos;s active AI visibility prompt set in the Audit app. Nothing runs
