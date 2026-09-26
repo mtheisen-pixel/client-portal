@@ -561,8 +561,8 @@ export function Admin() {
         <Logo large />
         <form className="card" onSubmit={handlePasswordSubmit}>
           <span className="eyebrow">Admin</span>
-          <h1>Enter password</h1>
-          <label htmlFor="admin-password">Admin password</label>
+          <h1>Enter Password</h1>
+          <label htmlFor="admin-password">Admin Password</label>
           <input
             id="admin-password"
             type="password"
@@ -588,15 +588,15 @@ export function Admin() {
         </span>
         {view === 'clients' ? (
           <button type="button" className="secondary" onClick={handleShowArchive}>
-            View archived clients
+            View Archived Clients
           </button>
         ) : (
           <button type="button" className="secondary" onClick={() => setView('clients')}>
-            Back to active clients
+            Back to Active Clients
           </button>
         )}
         <button type="button" className="secondary" onClick={handleLogout}>
-          Log out
+          Log Out
         </button>
       </SiteHeader>
 
@@ -605,7 +605,7 @@ export function Admin() {
 
         {view === 'archive' ? (
           <section className="card">
-            <h2>Archived clients</h2>
+            <h2>Archived Clients</h2>
             <p className="muted" style={{ marginTop: 4 }}>
               Archiving only hides a client from the active list above — their documents and
               portal login are untouched, and unarchiving brings them right back.
@@ -653,26 +653,26 @@ export function Admin() {
         ) : (
           <>
         <section className="card">
-          <h2>Add a client</h2>
+          <h2>Add a Client</h2>
           <form onSubmit={handleCreateClient} className="stacked-form">
-            <label htmlFor="companyName">Company name</label>
+            <label htmlFor="companyName">Company Name</label>
             <input id="companyName" name="companyName" required />
 
-            <label htmlFor="contactName">Primary contact name</label>
+            <label htmlFor="contactName">Primary Contact Name</label>
             <input id="contactName" name="contactName" />
 
-            <label htmlFor="contactRole">Role / title</label>
+            <label htmlFor="contactRole">Role / Title</label>
             <input id="contactRole" name="contactRole" placeholder="e.g. Marketing Director" />
 
-            <label htmlFor="email">Login email</label>
+            <label htmlFor="email">Login Email</label>
             <input id="email" name="email" type="email" required />
 
-            <label htmlFor="clientPassword">Temporary password</label>
+            <label htmlFor="clientPassword">Temporary Password</label>
             <input id="clientPassword" name="clientPassword" type="text" required minLength={8} />
 
             <label htmlFor="newClientCategory">Category</label>
             <select id="newClientCategory" name="category" defaultValue="">
-              <option value="">Not set</option>
+              <option value="">Not Set</option>
               {CLIENT_CATEGORIES.map((c) => (
                 <option key={c.value} value={c.value}>
                   {c.label}
@@ -691,7 +691,7 @@ export function Admin() {
             </p>
 
             <button type="submit" disabled={busy}>
-              Create client
+              Create Client
             </button>
           </form>
         </section>
@@ -705,7 +705,7 @@ export function Admin() {
               value={selectedClientId}
               onChange={(e) => setSelectedClientId(e.target.value)}
             >
-              <option value="">Select a client…</option>
+              <option value="">Select a Client…</option>
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.company_name}
@@ -729,14 +729,14 @@ export function Admin() {
                 }}
                 disabled={busy}
               >
-                Archive this client
+                Archive This Client
               </button>
             )}
           </div>
 
           {selectedClientId && (
             <>
-              <h3>Client details</h3>
+              <h3>Client Details</h3>
               <form onSubmit={handleUpdateClientDetails} className="stacked-form">
                 <label htmlFor="detailsCategory">Category</label>
                 <select
@@ -744,7 +744,7 @@ export function Admin() {
                   value={detailsCategory}
                   onChange={(e) => setDetailsCategory(e.target.value)}
                 >
-                  <option value="">Not set</option>
+                  <option value="">Not Set</option>
                   {CLIENT_CATEGORIES.map((c) => (
                     <option key={c.value} value={c.value}>
                       {c.label}
@@ -762,7 +762,7 @@ export function Admin() {
                 />
 
                 <button type="submit" disabled={busy}>
-                  Save client details
+                  Save Client Details
                 </button>
               </form>
 
@@ -792,22 +792,22 @@ export function Admin() {
                 {contacts.length === 0 && <p className="muted">No contacts yet.</p>}
               </ul>
 
-              <h3>Add a contact</h3>
+              <h3>Add a Contact</h3>
               <form onSubmit={handleAddContact} className="stacked-form">
-                <label htmlFor="contactEmail">Login email</label>
+                <label htmlFor="contactEmail">Login Email</label>
                 <input id="contactEmail" name="email" type="email" required />
 
-                <label htmlFor="contactTempPassword">Temporary password</label>
+                <label htmlFor="contactTempPassword">Temporary Password</label>
                 <input id="contactTempPassword" name="contactPassword" type="text" required minLength={8} />
 
                 <label htmlFor="contactPersonName">Name</label>
                 <input id="contactPersonName" name="name" />
 
-                <label htmlFor="contactPersonRole">Role / title</label>
+                <label htmlFor="contactPersonRole">Role / Title</label>
                 <input id="contactPersonRole" name="role" placeholder="e.g. Marketing Director" />
 
                 <button type="submit" disabled={contactsBusy}>
-                  {contactsBusy ? 'Adding…' : 'Add contact'}
+                  {contactsBusy ? 'Adding…' : 'Add Contact'}
                 </button>
               </form>
 
@@ -842,7 +842,7 @@ export function Admin() {
                 {docs.length === 0 && <p className="muted">No documents yet.</p>}
               </ul>
 
-              <h3>Upload a document</h3>
+              <h3>Upload a Document</h3>
               <form onSubmit={handleUpload} className="stacked-form">
                 <label htmlFor="title">Title</label>
                 <input id="title" name="title" required />
@@ -853,7 +853,7 @@ export function Admin() {
                 <label htmlFor="category">Category</label>
                 <select id="category" name="category" defaultValue="" required>
                   <option value="" disabled>
-                    Select a category…
+                    Select a Category…
                   </option>
                   {DOCUMENT_CATEGORIES.map((category) => (
                     <option key={category} value={category}>
@@ -866,7 +866,7 @@ export function Admin() {
                   regardless of the &quot;Admin only&quot; checkbox below.
                 </p>
 
-                <label htmlFor="sortOrder">Sort order</label>
+                <label htmlFor="sortOrder">Sort Order</label>
                 <input id="sortOrder" name="sortOrder" type="number" defaultValue={0} />
 
                 <label htmlFor="file">File</label>
@@ -874,7 +874,7 @@ export function Admin() {
 
                 <label className="checkbox-field">
                   <input id="adminOnly" name="adminOnly" type="checkbox" />
-                  Admin only (hidden from client)
+                  Admin Only (hidden from client)
                 </label>
 
                 <button type="submit" disabled={busy}>
@@ -882,7 +882,7 @@ export function Admin() {
                 </button>
               </form>
 
-              <h3>Run a website audit</h3>
+              <h3>Run a Website Audit</h3>
               <p className="muted" style={{ marginTop: 4 }}>
                 Crawls a small set of pages on the site and saves the result as Research
                 documents — same as uploading them by hand, just automated. Leave
@@ -901,7 +901,7 @@ export function Admin() {
                       required
                     />
 
-                    <label htmlFor="competitorName">Competitor name (optional)</label>
+                    <label htmlFor="competitorName">Competitor Name (optional)</label>
                     <input
                       id="competitorName"
                       name="competitorName"
@@ -910,7 +910,7 @@ export function Admin() {
                   </>
                 )}
 
-                <label>Audit type</label>
+                <label>Audit Type</label>
                 <label className="checkbox-field">
                   <input
                     type="radio"
@@ -948,7 +948,7 @@ export function Admin() {
 
                 {selectedAuditType === 'technical' && (
                   <>
-                    <label>SEO Audit depth</label>
+                    <label>SEO Audit Depth</label>
                     <label className="checkbox-field">
                       <input type="radio" name="auditDepth" value="light" defaultChecked />
                       Light — fast checks only (meta, structure, schema, hygiene, analytics)
@@ -967,7 +967,7 @@ export function Admin() {
 
                 {selectedAuditType === 'ai_visibility' && (
                   <>
-                    <label>AI Search Visibility tier</label>
+                    <label>AI Search Visibility Tier</label>
                     <label className="checkbox-field">
                       <input
                         type="radio"
@@ -1006,9 +1006,9 @@ export function Admin() {
 
                 <button type="submit" disabled={auditBusy || (selectedAuditType === 'ai_visibility' && aiRunActive)}>
                   {auditBusy
-                    ? 'Running audit…'
+                    ? 'Running Audit…'
                     : selectedAuditType === 'ai_visibility'
-                      ? 'Check readiness & cost'
+                      ? 'Check Readiness & Cost'
                       : 'Run Website Audit'}
                 </button>
               </form>
@@ -1024,7 +1024,7 @@ export function Admin() {
                   )}
                   {aiPreflight.reason === 'already_running' && aiPreflight.activeBatchId && aiPreflight.activeBatchIsSearchVisibility && (
                     <button type="button" onClick={() => setAiBatchId(aiPreflight.activeBatchId ?? null)}>
-                      Track the running batch
+                      Track the Running Batch
                     </button>
                   )}
                 </div>
@@ -1048,7 +1048,7 @@ export function Admin() {
                     <li>Runs in the background (typically 10–60 minutes). You can leave this page.</li>
                   </ul>
                   <button type="button" onClick={handleAiVisibilityConfirm} disabled={auditBusy}>
-                    {auditBusy ? 'Starting…' : 'Confirm & run'}
+                    {auditBusy ? 'Starting…' : 'Confirm & Run'}
                   </button>{' '}
                   <button type="button" onClick={() => setAiPreflight(null)} disabled={auditBusy}>
                     Cancel

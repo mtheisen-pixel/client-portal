@@ -58,7 +58,7 @@ export function Login() {
         <Logo large />
         <form className="card" onSubmit={handleResetRequest}>
           <span className="eyebrow">Client Portal</span>
-          <h1>Reset password</h1>
+          <h1>Reset Password</h1>
 
           {resetSent ? (
             <>
@@ -66,7 +66,7 @@ export function Login() {
                 If an account exists for that email, a reset link is on its way. Check your inbox.
               </p>
               <button type="button" className="secondary" onClick={backToSignIn}>
-                Back to sign in
+                Back to Sign In
               </button>
             </>
           ) : (
@@ -87,10 +87,10 @@ export function Login() {
               {error && <p className="error">{error}</p>}
 
               <button type="submit" disabled={submitting}>
-                {submitting ? 'Sending…' : 'Send reset link'}
+                {submitting ? 'Sending…' : 'Send Reset Link'}
               </button>
               <button type="button" className="link-button" style={{ marginTop: 14 }} onClick={backToSignIn}>
-                Back to sign in
+                Back to Sign In
               </button>
             </>
           )}
@@ -104,7 +104,7 @@ export function Login() {
       <Logo large />
       <form className="card" onSubmit={handleSubmit}>
         <span className="eyebrow">Client Portal</span>
-        <h1>Sign in</h1>
+        <h1>Sign In</h1>
         <p className="muted">Enter your details to view your documents.</p>
 
         {confirmation && <p className="success">{confirmation}</p>}
@@ -132,7 +132,7 @@ export function Login() {
         {error && <p className="error">{error}</p>}
 
         <button type="submit" disabled={submitting}>
-          {submitting ? 'Signing in…' : 'Sign in'}
+          {submitting ? 'Signing In…' : 'Sign In'}
         </button>
         <button
           type="button"
@@ -140,7 +140,7 @@ export function Login() {
           style={{ marginTop: 14 }}
           onClick={() => setMode('reset')}
         >
-          Forgot password?
+          Forgot Password?
         </button>
       </form>
     </div>

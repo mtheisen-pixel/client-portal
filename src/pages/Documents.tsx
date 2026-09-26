@@ -85,7 +85,7 @@ export function Documents() {
     <>
       <SiteHeader>
         <button type="button" className="secondary" onClick={handleSignOut}>
-          Sign out
+          Sign Out
         </button>
       </SiteHeader>
 
