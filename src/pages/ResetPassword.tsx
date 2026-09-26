@@ -74,7 +74,7 @@ export function ResetPassword() {
       <Logo large />
       <form className="card" onSubmit={handleSubmit}>
         <span className="eyebrow">Client Portal</span>
-        <h1>Set a new password</h1>
+        <h1>Set a New Password</h1>
 
         {status === 'checking' && <p className="muted">Verifying your reset link…</p>}
 
@@ -85,14 +85,14 @@ export function ResetPassword() {
               page.
             </p>
             <button type="button" onClick={() => navigate('/login')}>
-              Back to sign in
+              Back to Sign In
             </button>
           </>
         )}
 
         {status === 'ready' && (
           <>
-            <label htmlFor="newPassword">New password</label>
+            <label htmlFor="newPassword">New Password</label>
             <input
               id="newPassword"
               type="password"
@@ -103,7 +103,7 @@ export function ResetPassword() {
               required
             />
 
-            <label htmlFor="confirmPassword">Confirm password</label>
+            <label htmlFor="confirmPassword">Confirm Password</label>
             <input
               id="confirmPassword"
               type="password"
@@ -117,7 +117,7 @@ export function ResetPassword() {
             {error && <p className="error">{error}</p>}
 
             <button type="submit" disabled={submitting}>
-              {submitting ? 'Updating…' : 'Update password'}
+              {submitting ? 'Updating…' : 'Update Password'}
             </button>
           </>
         )}
