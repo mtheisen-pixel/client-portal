@@ -33,7 +33,23 @@ interface LighthouseAudit {
   displayValue?: string;
 }
 
+/** One Chrome UX Report metric as PSI returns it: the 75th-percentile value over the last 28 days and Google's rating of it. */
+interface CruxMetric {
+  percentile?: number;
+  category?: string;
+}
+
+interface CruxBlock {
+  /** True when PSI had too little data for this exact URL and fell back to the whole origin. */
+  origin_fallback?: boolean;
+  metrics?: Record<string, CruxMetric>;
+}
+
 interface PageSpeedApiResponse {
+  /** Field data for the checked URL (or its origin, see origin_fallback). Omitted when CrUX has too few real-visitor samples. */
+  loadingExperience?: CruxBlock;
+  /** Field data for the whole origin. Omitted when CrUX has too few samples for the site. */
+  originLoadingExperience?: CruxBlock;
   lighthouseResult?: {
     categories?: {
       performance?: { score: number | null };
@@ -43,20 +59,40 @@ interface PageSpeedApiResponse {
   };
 }
 
+/**
+ * Real-visitor (field) Core Web Vitals from the Chrome UX Report: 75th
+ * percentile over the last 28 days. Null on a PageSpeedResult when CrUX has
+ * too few samples, which is common for small sites — then only lab data
+ * exists, and the report must say so (see technical-guardrails.ts in the
+ * audit app).
+ */
+export interface FieldData {
+  /** "page" = this exact URL; "origin" = the whole site, used when the page alone has too little data. */
+  scope: "page" | "origin";
+  lcpMs: number | null;
+  inpMs: number | null;
+  /** CLS as a plain score (CrUX reports it multiplied by 100). */
+  cls: number | null;
+  ttfbMs: number | null;
+  /** Google's rating per metric: FAST / AVERAGE / SLOW. */
+  categories: { lcp: string | null; inp: string | null; cls: string | null };
+}
+
 export interface PageSpeedResult {
   url: string;
+  /** Real-visitor data, or null when the Chrome UX Report has none for this site. Everything else here is lab data. */
+  field: FieldData | null;
   performanceScore: number | null;
   accessibilityScore: number | null;
   lcp: string | null;
   /**
    * Total Blocking Time (Lighthouse audit id "total-blocking-time") —
    * Google's own recommended LAB-data proxy for INP, not literal INP
-   * itself. Real INP needs Chrome UX Report field data from actual visitors
-   * (INTERACTION_TO_NEXT_PAINT in PSI's loadingExperience block), which
-   * this app doesn't request/parse — a low-traffic site like most of this
-   * tool's targets often has no CrUX field data available at all, and PSI
+   * itself. Real INP is field data from actual visitors (see `field`, parsed
+   * from PSI's loadingExperience block) — a low-traffic site like most of
+   * this tool's targets often has no CrUX field data at all, and PSI
    * silently omits loadingExperience in that case rather than erroring, so
-   * there's nothing to fall back to. TBT is milliseconds, like real INP —
+   * TBT is the only interactivity signal then. TBT is milliseconds, like real INP —
    * unlike the previous, mislabeled field here (Lighthouse's "interactive"
    * audit, i.e. Time to Interactive, which is seconds-range and unrelated).
    */
@@ -178,6 +214,7 @@ export async function runPageSpeedInsights(url: string): Promise<PageSpeedResult
 
   return {
     url,
+    field: parseFieldData(data),
     performanceScore: toPercent(categories.performance?.score),
     accessibilityScore: toPercent(categories.accessibility?.score),
     lcp: audits["largest-contentful-paint"]?.displayValue ?? null,
@@ -194,24 +231,84 @@ export async function runPageSpeedInsights(url: string): Promise<PageSpeedResult
   };
 }
 
+function parseFieldData(data: PageSpeedApiResponse): FieldData | null {
+  const pageBlock = data.loadingExperience;
+  const block = pageBlock?.metrics && Object.keys(pageBlock.metrics).length > 0 ? pageBlock : data.originLoadingExperience;
+  const metrics = block?.metrics;
+  if (!metrics || Object.keys(metrics).length === 0) return null;
+  const value = (id: string) => (typeof metrics[id]?.percentile === "number" ? metrics[id].percentile! : null);
+  const category = (id: string) => metrics[id]?.category ?? null;
+  const clsRaw = value("CUMULATIVE_LAYOUT_SHIFT_SCORE");
+  return {
+    scope: block === pageBlock && !pageBlock?.origin_fallback ? "page" : "origin",
+    lcpMs: value("LARGEST_CONTENTFUL_PAINT_MS"),
+    inpMs: value("INTERACTION_TO_NEXT_PAINT"),
+    cls: clsRaw === null ? null : clsRaw / 100,
+    ttfbMs: value("EXPERIMENTAL_TIME_TO_FIRST_BYTE"),
+    categories: {
+      lcp: category("LARGEST_CONTENTFUL_PAINT_MS"),
+      inp: category("INTERACTION_TO_NEXT_PAINT"),
+      cls: category("CUMULATIVE_LAYOUT_SHIFT_SCORE"),
+    },
+  };
+}
+
+function formatMs(ms: number | null): string {
+  if (ms === null) return "n/a";
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
+}
+
+function withCategory(value: string, category: string | null): string {
+  return category ? `${value} (Google rating: ${category.toLowerCase()})` : value;
+}
+
+function fieldDataSection(field: FieldData | null): string[] {
+  if (!field) {
+    return [
+      "## Core Web Vitals — field data (real visitors)",
+      "",
+      "Not available: the Chrome UX Report has too few real-visitor samples for this site. Only the lab figures above exist — they come from one simulated load and are not what real visitors experience.",
+    ];
+  }
+  const scope =
+    field.scope === "page"
+      ? "this page"
+      : "the whole site (this page alone has too few samples)";
+  return [
+    `## Core Web Vitals — field data (real visitors, Chrome UX Report, 75th percentile over the last 28 days, ${scope})`,
+    "",
+    `- Largest Contentful Paint (LCP): ${withCategory(formatMs(field.lcpMs), field.categories.lcp)}`,
+    `- Interaction to Next Paint (INP): ${withCategory(formatMs(field.inpMs), field.categories.inp)}`,
+    `- Cumulative Layout Shift (CLS): ${withCategory(field.cls === null ? "n/a" : field.cls.toFixed(2), field.categories.cls)}`,
+    `- Time to First Byte (TTFB): ${formatMs(field.ttfbMs)}`,
+  ];
+}
+
 export function buildPageSpeedMarkdown(auditLabel: string, result: PageSpeedResult): string {
   const sections = [
     `# ${auditLabel} — Performance (PageSpeed Insights)`,
     "",
     `Checked: ${result.url}`,
     "",
-    "## Scores (mobile, 0-100)",
+    "## Measurement basis",
+    "",
+    `- Lab data: one Lighthouse run on a simulated mobile device with throttled CPU and network. Useful for diagnosing causes; not what real visitors experience.`,
+    `- Field data: ${result.field ? "available — see the field data section below. Prefer it over the lab figures when describing what visitors experience." : "not available for this site (see below), so every performance figure here is lab data."}`,
+    "",
+    "## Scores (lab, mobile, 0-100)",
     "",
     `- Performance: ${result.performanceScore ?? "n/a"}`,
     `- Accessibility: ${result.accessibilityScore ?? "n/a"}`,
     "",
-    "## Core Web Vitals",
+    "## Core Web Vitals — lab data (Lighthouse, simulated mobile)",
     "",
-    `- Largest Contentful Paint (LCP): ${result.lcp ?? "n/a"}`,
+    `- Largest Contentful Paint (LCP — when the largest content element renders, not when the page becomes interactive): ${result.lcp ?? "n/a"}`,
     `- Total Blocking Time (TBT — lab-data proxy for INP, not measured field data): ${result.tbt ?? "n/a"}`,
     `- Cumulative Layout Shift (CLS): ${result.cls ?? "n/a"}`,
     `- Total page weight: ${result.totalByteWeight ?? "n/a"}`,
     `- Mobile-friendly (viewport configured correctly): ${result.mobileFriendly === null ? "n/a" : result.mobileFriendly ? "yes" : "no"}`,
+    "",
+    ...fieldDataSection(result.field),
     "",
     "## Notable Issues",
     "",
