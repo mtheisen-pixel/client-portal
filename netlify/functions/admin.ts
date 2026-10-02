@@ -46,6 +46,51 @@ async function withLogoUrls<T extends ClientRow>(clients: T[]): Promise<(T & { l
   }))
 }
 
+// The client's competitor list lives in the Audit app's
+// ai_visibility_competitor_set (same database), keyed by the Audit
+// `clients` row linked to this portal account. AI Search Visibility tracks
+// the active ones and Audit reports benchmark up to three with a website.
+function normalizeName(name: string) {
+  return name.toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+async function auditClientIdFor(portalClientId: string, createIfMissing: boolean): Promise<string | null> {
+  const { data: existing, error } = await supabaseAdmin
+    .from('clients')
+    .select('id')
+    .eq('portal_client_id', portalClientId)
+    .limit(1)
+  if (error) throw error
+  if (existing && existing.length > 0) return existing[0].id as string
+  if (!createIfMissing) return null
+
+  // Same shape as the Audit app's /api/seo-studio/create-report: keyed on
+  // portal_client_id, named after the portal account.
+  const { data: portal, error: portalError } = await supabaseAdmin
+    .from('portal_clients')
+    .select('company_name, category')
+    .eq('id', portalClientId)
+    .single()
+  if (portalError || !portal) throw portalError ?? new Error('Portal client not found.')
+  const { data: created, error: createError } = await supabaseAdmin
+    .from('clients')
+    .insert({ name: portal.company_name, portal_client_id: portalClientId, category: portal.category ?? null })
+    .select('id')
+    .single()
+  if (createError) throw createError
+  return created.id as string
+}
+
+function normalizeSiteUrl(raw: string | undefined): string | null {
+  const value = (raw ?? '').trim()
+  if (!value) return null
+  try {
+    return new URL(value.includes('://') ? value : `https://${value}`).toString()
+  } catch {
+    return null
+  }
+}
+
 export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' }
@@ -360,6 +405,59 @@ export const handler: Handler = async (event) => {
         if (dbError) throw dbError
 
         return json(200, { ok: true })
+      }
+
+      case 'list_competitors': {
+        const { clientId } = body as { clientId?: string }
+        if (!clientId) return json(400, { error: 'clientId is required.' })
+        const auditClientId = await auditClientIdFor(clientId, false)
+        if (!auditClientId) return json(200, { competitors: [] })
+        const { data, error } = await supabaseAdmin
+          .from('ai_visibility_competitor_set')
+          .select('id, competitor_name, site_url, active, competitor_kind')
+          .eq('client_id', auditClientId)
+          .order('competitor_name')
+        if (error) throw error
+        return json(200, { competitors: data ?? [] })
+      }
+
+      // Called when a Competitor Audit runs: adds the competitor to the
+      // client's list (inactive — activating it in the Audit app is the
+      // approval) or fills in its website if the list had none.
+      case 'save_competitor': {
+        const { clientId, name, siteUrl } = body as { clientId?: string; name?: string; siteUrl?: string }
+        const competitorName = (name ?? '').trim()
+        if (!clientId || !competitorName) return json(400, { error: 'clientId and name are required.' })
+        const auditClientId = await auditClientIdFor(clientId, true)
+        const url = normalizeSiteUrl(siteUrl)
+
+        const { data: rows, error } = await supabaseAdmin
+          .from('ai_visibility_competitor_set')
+          .select('id, competitor_name, site_url')
+          .eq('client_id', auditClientId)
+        if (error) throw error
+        const match = (rows ?? []).find((r) => normalizeName(r.competitor_name) === normalizeName(competitorName))
+
+        if (match) {
+          if (url && !match.site_url) {
+            const { error: updateError } = await supabaseAdmin
+              .from('ai_visibility_competitor_set')
+              .update({ site_url: url })
+              .eq('id', match.id)
+            if (updateError) throw updateError
+          }
+          return json(200, { created: false })
+        }
+
+        const { error: insertError } = await supabaseAdmin.from('ai_visibility_competitor_set').insert({
+          client_id: auditClientId,
+          competitor_name: competitorName,
+          site_url: url,
+          active: false,
+          notes: 'Added from a Competitor Audit on the portal Admin page.',
+        })
+        if (insertError) throw insertError
+        return json(200, { created: true })
       }
 
       default:

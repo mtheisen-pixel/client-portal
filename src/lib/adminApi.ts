@@ -18,6 +18,15 @@ async function call<T>(password: string, action: string, payload: Record<string,
   return data as T
 }
 
+/** One entry in the client's competitor list (the Audit app's ai_visibility_competitor_set). */
+export interface AdminCompetitor {
+  id: string
+  competitor_name: string
+  site_url: string | null
+  active: boolean
+  competitor_kind: string | null
+}
+
 export interface AdminClient {
   id: string
   company_name: string
@@ -54,6 +63,8 @@ export interface AdminDocument {
 export interface AiSearchVisibilityEstimate {
   promptCount: number
   platforms: string[]
+  /** Times each prompt is asked per platform and search setting (Audit app, analyst-enhancements item 4.1). Absent from older Audit deployments. */
+  repetitions?: number
   plannedCalls: number
   lowUsd: number
   highUsd: number
@@ -62,7 +73,7 @@ export interface AiSearchVisibilityEstimate {
 /** Readiness check before an AI Search Visibility Audit run — see the Audit app's src/lib/ai-search-visibility/server.ts. */
 export interface AiSearchVisibilityPreflight {
   ready: boolean
-  reason?: 'not_linked' | 'no_prompt_set' | 'already_running'
+  reason?: 'not_linked' | 'no_prompt_set' | 'no_competitors' | 'already_running'
   message?: string
   setupUrl?: string
   clientName?: string
@@ -165,6 +176,12 @@ export const adminApi = {
 
   removeContact: (password: string, contactId: string) =>
     call<{ ok: true }>(password, 'remove_contact', { contactId }),
+
+  listCompetitors: (password: string, clientId: string) =>
+    call<{ competitors: AdminCompetitor[] }>(password, 'list_competitors', { clientId }),
+
+  saveCompetitor: (password: string, clientId: string, name: string, siteUrl: string) =>
+    call<{ created: boolean }>(password, 'save_competitor', { clientId, name, siteUrl }),
 
   listDocuments: (password: string, clientId: string) =>
     call<{ documents: AdminDocument[] }>(password, 'list_documents', { clientId }),
