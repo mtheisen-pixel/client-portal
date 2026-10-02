@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { adminApi } from '../lib/adminApi'
 import type {
   AdminClient,
+  AdminCompetitor,
   AdminContact,
   AdminDocument,
   AiSearchVisibilityPreflight,
@@ -98,6 +99,9 @@ export function Admin() {
   const [archiveLoading, setArchiveLoading] = useState(false)
   const [auditBusy, setAuditBusy] = useState(false)
   const [auditStatus, setAuditStatus] = useState<string | null>(null)
+  const [competitors, setCompetitors] = useState<AdminCompetitor[]>([])
+  const websiteUrlRef = useRef<HTMLInputElement>(null)
+  const competitorNameRef = useRef<HTMLInputElement>(null)
   const [auditReviewUrl, setAuditReviewUrl] = useState<string | null>(null)
   const [selectedAuditType, setSelectedAuditType] = useState<'creative' | 'technical' | 'ai_visibility'>('creative')
   // AI Search Visibility Audit: preflight (readiness + cost) → confirm → start → poll.
@@ -140,6 +144,24 @@ export function Admin() {
     setDocs(documents)
   }
 
+  async function refreshCompetitors(clientId: string) {
+    if (!clientId) {
+      setCompetitors([])
+      return
+    }
+    const { competitors } = await adminApi.listCompetitors(password, clientId)
+    setCompetitors(competitors)
+  }
+
+  // Fills the Website Audit form from a saved competitor (or back to the
+  // client's own site), so names and URLs match the client's competitor list.
+  function pickSavedCompetitor(id: string) {
+    const competitor = competitors.find((c) => c.id === id)
+    const client = clients.find((c) => c.id === selectedClientId)
+    if (competitorNameRef.current) competitorNameRef.current.value = competitor?.competitor_name ?? ''
+    if (websiteUrlRef.current) websiteUrlRef.current.value = competitor ? competitor.site_url ?? '' : client?.site_url ?? ''
+  }
+
   async function refreshContacts(clientId: string) {
     if (!clientId) {
       setContacts([])
@@ -152,6 +174,7 @@ export function Admin() {
   useEffect(() => {
     if (unlocked) refreshDocs(selectedClientId).catch((err) => setError(err.message))
     if (unlocked) refreshContacts(selectedClientId).catch((err) => setError(err.message))
+    if (unlocked) refreshCompetitors(selectedClientId).catch((err) => setError(err.message))
 
     const client = clients.find((c) => c.id === selectedClientId)
     setDetailsCategory(client?.category ?? '')
@@ -433,6 +456,18 @@ export function Admin() {
         | 'light'
         | 'comprehensive'
       const label = competitorName ? `Competitor Audit for "${competitorName}"` : 'Website Audit'
+
+      if (competitorName) {
+        // Keep the client's competitor list in step: a new competitor is
+        // added inactive (approved in the Audit app), an existing one gets
+        // this URL if it had none. Never blocks the audit itself.
+        try {
+          await adminApi.saveCompetitor(password, selectedClientId, competitorName, url)
+          await refreshCompetitors(selectedClientId)
+        } catch (err) {
+          setError(`Couldn't save "${competitorName}" to the client's competitor list: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
 
       if (auditType === 'creative') {
         const { pagesCrawled } = await adminApi.runWebsiteAudit(password, selectedClientId, url, competitorName || undefined, 'creative')
@@ -892,8 +927,25 @@ export function Admin() {
               <form onSubmit={handleRunWebsiteAudit} className="stacked-form">
                 {selectedAuditType !== 'ai_visibility' && (
                   <>
+                    {competitors.length > 0 && (
+                      <>
+                        <label htmlFor="savedCompetitor">Saved Competitor (optional)</label>
+                        <select id="savedCompetitor" defaultValue="" onChange={(e) => pickSavedCompetitor(e.target.value)}>
+                          <option value="">The client&apos;s own site, or type a new competitor below</option>
+                          {competitors.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.competitor_name}
+                              {c.site_url ? '' : ' (no website saved)'}
+                              {c.active ? '' : ' (not yet approved)'}
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    )}
+
                     <label htmlFor="websiteUrl">Website URL</label>
                     <input
+                      ref={websiteUrlRef}
                       id="websiteUrl"
                       name="websiteUrl"
                       type="url"
@@ -903,10 +955,15 @@ export function Admin() {
 
                     <label htmlFor="competitorName">Competitor Name (optional)</label>
                     <input
+                      ref={competitorNameRef}
                       id="competitorName"
                       name="competitorName"
                       placeholder="Leave blank for the client's own site — or name a competitor, e.g. Parachute"
                     />
+                    <p className="muted" style={{ marginTop: 4 }}>
+                      A new competitor is added to the client&apos;s competitor list in the Audit app, not yet
+                      approved — activate it there to include it in AI Search Visibility and report benchmarks.
+                    </p>
                   </>
                 )}
 

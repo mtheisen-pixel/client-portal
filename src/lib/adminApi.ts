@@ -18,6 +18,15 @@ async function call<T>(password: string, action: string, payload: Record<string,
   return data as T
 }
 
+/** One entry in the client's competitor list (the Audit app's ai_visibility_competitor_set). */
+export interface AdminCompetitor {
+  id: string
+  competitor_name: string
+  site_url: string | null
+  active: boolean
+  competitor_kind: string | null
+}
+
 export interface AdminClient {
   id: string
   company_name: string
@@ -167,6 +176,12 @@ export const adminApi = {
 
   removeContact: (password: string, contactId: string) =>
     call<{ ok: true }>(password, 'remove_contact', { contactId }),
+
+  listCompetitors: (password: string, clientId: string) =>
+    call<{ competitors: AdminCompetitor[] }>(password, 'list_competitors', { clientId }),
+
+  saveCompetitor: (password: string, clientId: string, name: string, siteUrl: string) =>
+    call<{ created: boolean }>(password, 'save_competitor', { clientId, name, siteUrl }),
 
   listDocuments: (password: string, clientId: string) =>
     call<{ documents: AdminDocument[] }>(password, 'list_documents', { clientId }),
