@@ -1,6 +1,6 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
-import { authorizeAdminRequest } from './lib/auth'
+import { authorizeAdminRequest, isServiceRequest } from './lib/auth'
 import { discoverPages, runWebsiteAudit } from './lib/site-audit'
 import { runTechnicalAuditFast } from './lib/technical-audit'
 import { createSeoStudioReport } from './lib/seo-studio-handoff'
@@ -90,15 +90,22 @@ export const handler: Handler = async (event) => {
     return json(400, { error: 'Invalid JSON' })
   }
 
-  const authError = await authorizeAdminRequest(supabaseAdmin, event, body.password)
-  if (authError) return json(authError.statusCode, { error: authError.error })
+  // Staff (Admin page) authenticate with the admin password; the Audit
+  // app's Run Full Audit authenticates with the shared service secret.
+  const serviceCall = isServiceRequest(event)
+  if (!serviceCall) {
+    const authError = await authorizeAdminRequest(supabaseAdmin, event, body.password)
+    if (authError) return json(authError.statusCode, { error: authError.error })
+  }
 
-  const { clientId, url, competitorName, auditType, depth } = body as {
+  const { clientId, url, competitorName, auditType, depth, skipReportHandoff } = body as {
     clientId?: string
     url?: string
     competitorName?: string
     auditType?: 'creative' | 'technical'
     depth?: 'light' | 'comprehensive'
+    /** Run Full Audit: save the Research document only; the Audit app builds one combined report. */
+    skipReportHandoff?: boolean
   }
   if (!clientId || !url) {
     return json(400, { error: 'clientId and url are required.' })
@@ -152,7 +159,7 @@ export const handler: Handler = async (event) => {
       // separately by Admin.tsx via startPerformanceCheck) — the handoff to
       // the Audit app's review pipeline happens once for both documents
       // together, from website-audit-performance-background.ts, not here.
-      if (auditDepth === 'light') {
+      if (auditDepth === 'light' && !(serviceCall && skipReportHandoff)) {
         let reviewUrl: string | undefined
         let handoffError: string | undefined
         try {

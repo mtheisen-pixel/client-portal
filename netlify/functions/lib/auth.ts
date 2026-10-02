@@ -95,3 +95,20 @@ export async function authorizeAdminRequest(
   await clearLockout(supabaseAdmin, ip)
   return null
 }
+
+/**
+ * Server-to-server calls from the Audit app (Run Full Audit) authenticate
+ * with the same shared secret the portal already uses to call the Audit
+ * app (SEO_STUDIO_HANDOFF_SECRET), as an Authorization: Bearer header,
+ * instead of the staff admin password. Constant-time compare; false when
+ * the secret isn't configured.
+ */
+export function isServiceRequest(event: HandlerEvent): boolean {
+  const expected = (process.env.SEO_STUDIO_HANDOFF_SECRET ?? '').trim()
+  const header = event.headers?.authorization ?? event.headers?.Authorization ?? ''
+  const provided = header.replace(/^Bearer\s+/i, '').trim()
+  if (!expected || !provided) return false
+  const a = Buffer.from(provided)
+  const b = Buffer.from(expected)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
