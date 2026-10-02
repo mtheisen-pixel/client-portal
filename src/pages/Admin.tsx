@@ -1037,8 +1037,11 @@ export function Admin() {
                   </p>
                   <ul className="muted">
                     <li>
-                      {aiPreflight.estimate.promptCount} prompt(s) × {aiPreflight.estimate.platforms.join(', ')} ={' '}
-                      {aiPreflight.estimate.plannedCalls} paid AI platform calls
+                      {aiPreflight.estimate.promptCount} prompt(s) × {aiPreflight.estimate.platforms.join(', ')}
+                      {aiPreflight.estimate.repetitions && aiPreflight.estimate.repetitions > 1
+                        ? ` × ${aiPreflight.estimate.repetitions} repetitions`
+                        : ''}{' '}
+                      = {aiPreflight.estimate.plannedCalls} paid AI platform calls
                     </li>
                     <li>
                       Estimated cost: roughly ${aiPreflight.estimate.lowUsd.toFixed(2)}–$

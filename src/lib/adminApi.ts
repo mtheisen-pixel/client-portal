@@ -54,6 +54,8 @@ export interface AdminDocument {
 export interface AiSearchVisibilityEstimate {
   promptCount: number
   platforms: string[]
+  /** Times each prompt is asked per platform and search setting (Audit app, analyst-enhancements item 4.1). Absent from older Audit deployments. */
+  repetitions?: number
   plannedCalls: number
   lowUsd: number
   highUsd: number
@@ -62,7 +64,7 @@ export interface AiSearchVisibilityEstimate {
 /** Readiness check before an AI Search Visibility Audit run — see the Audit app's src/lib/ai-search-visibility/server.ts. */
 export interface AiSearchVisibilityPreflight {
   ready: boolean
-  reason?: 'not_linked' | 'no_prompt_set' | 'already_running'
+  reason?: 'not_linked' | 'no_prompt_set' | 'no_competitors' | 'already_running'
   message?: string
   setupUrl?: string
   clientName?: string
