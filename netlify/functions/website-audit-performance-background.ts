@@ -1,6 +1,6 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
-import { authorizeAdminRequest } from './lib/auth'
+import { authorizeAdminRequest, isServiceRequest } from './lib/auth'
 import { runPageSpeedInsights, buildPageSpeedMarkdown } from './lib/pagespeed'
 import { createSeoStudioReport } from './lib/seo-studio-handoff'
 
@@ -111,12 +111,16 @@ export const handler: Handler = async (event) => {
     return { statusCode: 400, body: '' }
   }
 
-  const { clientId, url, competitorName, technicalDocumentId } = body as {
+  const { clientId, url, competitorName, technicalDocumentId, skipReportHandoff } = body as {
     clientId?: string
     url?: string
     competitorName?: string
     technicalDocumentId?: string
+    /** Run Full Audit (service call only): save the performance document, no separate review report. */
+    skipReportHandoff?: boolean
   }
+  const serviceCall = isServiceRequest(event)
+  const skipHandoff = serviceCall && skipReportHandoff === true
   if (!clientId || !url) return { statusCode: 400, body: '' }
   const resolvedClientId: string = clientId
 
@@ -140,7 +144,7 @@ export const handler: Handler = async (event) => {
   // Admin.tsx only calls startPerformanceCheck when depth === 'comprehensive'
   // — so the handoff below always reports audit_depth: 'comprehensive'.
   async function handOffToAuditApp(researchDocumentIds: string[], performanceData: 'included' | 'missing') {
-    if (researchDocumentIds.length === 0) return null
+    if (researchDocumentIds.length === 0 || skipHandoff) return null
     const { data: portalClient } = await supabaseAdmin
       .from('portal_clients')
       .select('company_name')
@@ -156,8 +160,10 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    const authError = await authorizeAdminRequest(supabaseAdmin, event, body.password)
-    if (authError) throw new Error(authError.error)
+    if (!serviceCall) {
+      const authError = await authorizeAdminRequest(supabaseAdmin, event, body.password)
+      if (authError) throw new Error(authError.error)
+    }
 
     const result = await runPageSpeedInsights(url)
     const markdown = buildPageSpeedMarkdown(fullLabel, result)
